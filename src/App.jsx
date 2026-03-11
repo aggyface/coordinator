@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import useSession from './hooks/useSession';
+import { decodeImage } from './engine/imageLoader';
 import Toolbar from './components/Toolbar';
 import ImageCanvas from './components/ImageCanvas';
 import PointList from './components/PointList';
@@ -20,6 +21,10 @@ export default function App() {
     computedCoords,
     transforms,
     isDirty,
+    imageBitmap,
+    setImageBitmap,
+    imageBuffer,
+    setImageBuffer,
     addInstrument,
     updateInstrument,
     deleteInstrument,
@@ -38,7 +43,57 @@ export default function App() {
   const [isTagDrawerOpen, setIsTagDrawerOpen] = useState(false);
   const [isNewProjectOpen, setIsNewProjectOpen] = useState(false);
 
+  // Automatic image decoding whenever the buffer changes (e.g. after loading a .labcoord)
+  useEffect(() => {
+    if (imageBuffer && !imageBitmap) {
+      decodeImage(imageBuffer).then(setImageBitmap).catch(console.error);
+    }
+  }, [imageBuffer, imageBitmap, setImageBitmap]);
+
+  const handleCreateProject = (data) => {
+    setSessionMetadata(data.projectName, data.sampleId);
+    addInstrument(data.sourceInstrument);
+    // Find the instrument ID after creation (it's generated in the hook)
+    setIsNewProjectOpen(false);
+  };
+
+  // Sync activeInstrumentId when instruments are added if none is selected
+  useEffect(() => {
+    if (!activeInstrumentId && session.instruments.length > 0) {
+      setActiveInstrumentId(session.instruments[0].id);
+    }
+  }, [session.instruments, activeInstrumentId]);
+
   const selectedPoint = session.points.find(p => p.id === selectedPointId);
+
+  const handleFileOpen = async (file) => {
+    if (file.name.endsWith('.labcoord')) {
+      await loadSession(file);
+    } else {
+      // Treat as raw image import
+      const buffer = await file.arrayBuffer();
+      setImageBuffer(buffer);
+      const bitmap = await decodeImage(buffer, file.name);
+      setImageBitmap(bitmap);
+    }
+  };
+
+  const handleSave = async () => {
+    try {
+      const blob = await saveSession();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${session.projectName || 'project'}.labcoord`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      console.error('Save failed:', err);
+      alert('Failed to save project. See console for details.');
+    }
+  };
 
   return (
     <div className="app-layout" style={{ display: 'flex', flexDirection: 'column', height: '100vh', backgroundColor: '#242424', color: '#fff' }}>
@@ -48,7 +103,8 @@ export default function App() {
         onModeChange={setMode}
         onTagsOpen={() => setIsTagDrawerOpen(true)}
         onNew={() => setIsNewProjectOpen(true)}
-        onSave={saveSession}
+        onSave={handleSave}
+        onOpen={handleFileOpen}
       />
 
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
@@ -86,31 +142,44 @@ export default function App() {
           )}
         </div>
 
-        <ImageCanvas 
-          session={session}
-          mode={mode}
-          activeInstrumentId={activeInstrumentId}
-          selectedPointId={selectedPointId}
-          onPointClick={setSelectedPointId}
-        />
-      </div>
-
-      <TagDrawer 
+      <ImageCanvas 
         session={session}
-        isOpen={isTagDrawerOpen}
-        onClose={() => setIsTagDrawerOpen(false)}
-        onUpdateTags={updateTagCategories}
+        mode={mode}
+        activeInstrumentId={activeInstrumentId}
+        selectedPointId={selectedPointId}
+        onPointClick={setSelectedPointId}
+        onCanvasClick={(coords) => {
+          if (mode === 'Add Point') {
+            addPoint({ pixelCoords: coords });
+          }
+        }}
+        imageBitmap={imageBitmap}
+        setImageBitmap={setImageBitmap}
+        imageBuffer={imageBuffer}
       />
+    </div>
 
-      <PointModal 
-        point={selectedPoint}
-        session={session}
-        onSave={(updates) => updatePoint(selectedPointId, updates)}
-        onClose={() => setSelectedPointId(null)}
-      />
+    <TagDrawer 
+      session={session}
+      isOpen={isTagDrawerOpen}
+      onClose={() => setIsTagDrawerOpen(false)}
+      onUpdateTags={updateTagCategories}
+    />
+
+    <PointModal 
+      point={selectedPoint}
+      session={session}
+      onSave={(updates) => updatePoint(selectedPointId, updates)}
+      onDelete={(id) => {
+        deletePoint(id);
+        setSelectedPointId(null);
+      }}
+      onClose={() => setSelectedPointId(null)}
+    />
 
       <NewProjectModal 
         isOpen={isNewProjectOpen}
+        onCreate={handleCreateProject}
         onCancel={() => setIsNewProjectOpen(false)}
       />
     </div>

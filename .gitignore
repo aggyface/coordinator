@@ -1,0 +1,9 @@
+node_modules/
+dist/
+*.labcoord
+*.bmp
+*.tif
+*.tiff
+.env
+.DS_Store
+package-lock.json
