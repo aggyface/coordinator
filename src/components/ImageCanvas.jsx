@@ -1,36 +1,55 @@
-import React, { useRef, useEffect, useState, useCallback } from 'react';
+import React, { useRef, useEffect, useState, useCallback, useImperativeHandle, forwardRef } from 'react';
 import { decodeImage, calculateFitScale } from '../engine/imageLoader';
-import { computeConvexHull } from '../engine/transform';
+import { computeConvexHull, computeLocalScale } from '../engine/transform';
 
 const COLORS = {
   reference: '#00ffff',
   analysis: '#ffeb3b',
   selected: '#ffffff',
-  hull: 'rgba(0, 255, 255, 0.3)'
+  hull: 'rgba(0, 255, 255, 0.3)',
+  hover: 'rgba(255, 255, 255, 0.25)'
 };
 
 /**
  * ImageCanvas Component.
  * High-performance microscopy image renderer with pan/zoom and marker overlays.
  */
-export default function ImageCanvas({ 
+const ImageCanvas = forwardRef(({ 
   session, 
   mode, 
   activeInstrumentId, 
   onPointClick, 
   onCanvasClick, 
   selectedPointId,
+  hoveredPointId,
+  showLegend,
+  showScaleBar,
+  onHover,
   imageBitmap,
   onOpen
-}) {
+}, ref) => {
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
   
   // Viewport state
   const [viewport, setViewport] = useState({ x: 0, y: 0, scale: 1 });
   const [isPanning, setIsPanning] = useState(false);
-  const [hoveredPointId, setHoveredPointId] = useState(null);
   const lastMousePos = useRef({ x: 0, y: 0 });
+
+  /**
+   * Expose controls to parent via ref.
+   */
+  useImperativeHandle(ref, () => ({
+    centerOn: (imageX, imageY) => {
+      if (!containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      setViewport(prev => ({
+        ...prev,
+        x: rect.width / 2 - imageX * prev.scale,
+        y: rect.height / 2 - imageY * prev.scale
+      }));
+    }
+  }));
 
   /**
    * Helper to fit image to viewport.
@@ -60,10 +79,10 @@ export default function ImageCanvas({
 
       const panStep = 50 / viewport.scale;
       switch(e.key) {
-        case 'ArrowUp':    setViewport(v => ({ ...v, y: v.y + panStep * v.scale })); break;
-        case 'ArrowDown':  setViewport(v => ({ ...v, y: v.y - panStep * v.scale })); break;
-        case 'ArrowLeft':  setViewport(v => ({ ...v, x: v.x + panStep * v.scale })); break;
-        case 'ArrowRight': setViewport(v => ({ ...v, x: v.x - panStep * v.scale })); break;
+        case 'ArrowUp':    setViewport(v => ({ ...v, y: v.y + 50 })); break;
+        case 'ArrowDown':  setViewport(v => ({ ...v, y: v.y - 50 })); break;
+        case 'ArrowLeft':  setViewport(v => ({ ...v, x: v.x + 50 })); break;
+        case 'ArrowRight': setViewport(v => ({ ...v, x: v.x - 50 })); break;
         case '+':
         case '=':          adjustZoom(1.2); break;
         case '-':
@@ -122,6 +141,95 @@ export default function ImageCanvas({
   };
 
   /**
+   * Scale Bar Rendering.
+   */
+  const renderScaleBar = (ctx, canvasWidth, canvasHeight) => {
+    const activeInst = session.instruments.find(i => i.id === activeInstrumentId);
+    if (!activeInst) return;
+
+    const refs = session.points
+      .filter(p => p.enteredCoords[activeInstrumentId])
+      .map(p => ({ oldCoord: p.pixelCoords, newCoord: p.enteredCoords[activeInstrumentId] }));
+
+    const scaleResult = computeLocalScale({ x: 0, y: 0 }, refs, activeInst.units);
+    if (!scaleResult.scale) return;
+
+    // Scale is units/px. We want to find a nice round number of units.
+    const screenPxPerUnit = viewport.scale / scaleResult.scale;
+    const targetBarWidthPx = 150; // We want a bar about 150px wide
+    const units = targetBarWidthPx / screenPxPerUnit;
+    
+    // Round to nice number (1, 2, 5, 10, 20, 50, 100, 250, 500, etc)
+    const magnitude = Math.pow(10, Math.floor(Math.log10(units)));
+    const firstDigit = units / magnitude;
+    let niceUnits = magnitude;
+    if (firstDigit > 5) niceUnits = 5 * magnitude;
+    else if (firstDigit > 2) niceUnits = 2 * magnitude;
+    
+    const barWidthPx = niceUnits * screenPxPerUnit;
+
+    // Draw Bar
+    ctx.save();
+    ctx.translate(30, canvasHeight - 40);
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(0, -5); ctx.lineTo(0, 0); ctx.lineTo(barWidthPx, 0); ctx.lineTo(barWidthPx, -5);
+    ctx.stroke();
+
+    // Label
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 12px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(`${niceUnits} ${activeInst.units}`, barWidthPx / 2, 15);
+    ctx.restore();
+  };
+
+  /**
+   * Legend Rendering.
+   */
+  const renderLegend = (ctx, canvasWidth, canvasHeight) => {
+    const colorCat = session.tagCategories.find(c => c.isColorCategory);
+    if (!showLegend || !colorCat || colorCat.values.length === 0) return;
+
+    const rowHeight = 20;
+    const padding = 12;
+    const width = 150;
+    const height = (colorCat.values.length + 1) * rowHeight + padding * 2;
+
+    ctx.save();
+    // Position at Top Right
+    ctx.translate(canvasWidth - width - 20, 20);
+    
+    // Box
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
+    ctx.fillRect(0, 0, width, height);
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+    ctx.strokeRect(0, 0, width, height);
+
+    // Title
+    ctx.fillStyle = '#aaa';
+    ctx.font = 'bold 10px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(colorCat.name.toUpperCase(), padding, padding + 10);
+
+    // Rows
+    colorCat.values.forEach((v, i) => {
+      const y = padding + 25 + (i * rowHeight);
+      ctx.beginPath();
+      ctx.arc(padding + 5, y - 4, 5, 0, Math.PI * 2);
+      ctx.fillStyle = v.color;
+      ctx.fill();
+      
+      ctx.fillStyle = '#fff';
+      ctx.font = '12px sans-serif';
+      ctx.fillText(v.label, padding + 18, y);
+    });
+
+    ctx.restore();
+  };
+
+  /**
    * Main Rendering Loop.
    */
   const render = useCallback(() => {
@@ -169,8 +277,8 @@ export default function ImageCanvas({
 
         if (isHovered && !isSelected) {
           ctx.beginPath();
-          ctx.arc(screenX, screenY, markerSize + 5, 0, Math.PI * 2);
-          ctx.fillStyle = 'rgba(255, 255, 255, 0.15)';
+          ctx.arc(screenX, screenY, markerSize + 6, 0, Math.PI * 2);
+          ctx.fillStyle = COLORS.hover;
           ctx.fill();
         }
 
@@ -186,8 +294,11 @@ export default function ImageCanvas({
           drawAnalysisMarker(ctx, screenX, screenY, markerSize, categoryColor, isSelected);
         }
       });
+
+      if (showScaleBar) renderScaleBar(ctx, canvas.width, canvas.height);
+      renderLegend(ctx, canvas.width, canvas.height);
     }
-  }, [imageBitmap, viewport, session, activeInstrumentId, selectedPointId]);
+  }, [imageBitmap, viewport, session, activeInstrumentId, selectedPointId, hoveredPointId, showLegend, showScaleBar]);
 
   useEffect(() => {
     const frame = requestAnimationFrame(render);
@@ -216,7 +327,6 @@ export default function ImageCanvas({
       setViewport(prev => ({ ...prev, x: prev.x + dx, y: prev.y + dy }));
       lastMousePos.current = { x: e.clientX, y: e.clientY };
     } else {
-      // Hit testing for hover
       const threshold = 15;
       let hoveredId = null;
       session.points.forEach(point => {
@@ -225,7 +335,7 @@ export default function ImageCanvas({
         const dist = Math.sqrt(Math.pow(mouseX - screenX, 2) + Math.pow(mouseY - screenY, 2));
         if (dist < threshold) hoveredId = point.id;
       });
-      setHoveredPointId(hoveredId);
+      onHover(hoveredId);
     }
   };
 
@@ -280,7 +390,13 @@ export default function ImageCanvas({
     if (clickedPoint) {
       onPointClick(clickedPoint.id);
     } else if (mode === 'Add Point') {
-      onCanvasClick({ x: (mouseX - viewport.x) / viewport.scale, y: (mouseY - viewport.y) / viewport.scale });
+      const px = (mouseX - viewport.x) / viewport.scale;
+      const py = (mouseY - viewport.y) / viewport.scale;
+      
+      // Boundary check: Do not allow points off the image
+      if (px >= 0 && px <= imageBitmap.width && py >= 0 && py <= imageBitmap.height) {
+        onCanvasClick({ x: px, y: py });
+      }
     } else {
       onPointClick(null);
     }
@@ -294,7 +410,7 @@ export default function ImageCanvas({
       onMouseDown={handleMouseDown}
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
-      onMouseLeave={handleMouseUp}
+      onMouseLeave={() => { handleMouseUp(); onHover(null); }}
       onWheel={handleWheel}
       onClick={handleClick}
       onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
@@ -302,7 +418,6 @@ export default function ImageCanvas({
     >
       <canvas ref={canvasRef} style={{ display: 'block' }} />
       
-      {/* Navigation Controls Overlay */}
       <div style={styles.navOverlay}>
         <div style={styles.pad}>
           <button onClick={() => setViewport(v => ({ ...v, y: v.y + 100 }))} style={styles.navBtn}>▲</button>
@@ -320,7 +435,7 @@ export default function ImageCanvas({
       </div>
     </div>
   );
-}
+});
 
 const styles = {
   navOverlay: {
@@ -333,3 +448,5 @@ const styles = {
     backgroundColor: '#333', border: '1px solid #555', color: '#fff', borderRadius: 4, cursor: 'pointer', fontSize: 14
   }
 };
+
+export default ImageCanvas;

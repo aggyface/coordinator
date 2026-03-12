@@ -84,3 +84,36 @@ gemini-cli checkpoints before every file edit:
 
 If session is already closed: `git revert` to last commit.
 Each completed prompt should be committed immediately as a permanent checkpoint.
+
+---
+
+## 6. Project Post-Mortem & Architecture Review
+
+### Architectural Successes
+1. **Isolated Math Engine (`transform.js`):** Building the least-squares similarity transform as a set of pure, framework-agnostic functions was highly successful. It allowed us to write a standalone Node.js verification script (`verify-engine.js`) that proved the math against real-world Excel data before a single React component was written. This established absolute trust in the core logic.
+2. **Derived State Supremacy:** By strictly adhering to the rule "Derived state is never stored," we eliminated an entire category of desynchronization bugs. A point's "Reference" status is dynamically determined by the presence of `enteredCoords`, and all transformations are calculated on the fly in `useSession.js` via `useMemo`. This made the UI incredibly resilient to data edits.
+3. **OffscreenCanvas Export:** Delegating the high-resolution annotated image generation to a Web Worker (`exportWorker.js`) was essential. Drawing hundreds of markers onto a 250MB ImageBitmap on the main thread would have frozen the UI. The background worker ensures a smooth experience.
+
+### Challenges & Adaptations
+1. **Small-Sample Statistics:** The original spec required flagging a transform as "blocked" if the RMSE was > 10x the median residual. During testing, we discovered that in a 4-point least-squares fit, a single massive outlier distorts the entire fit so heavily that *all* residuals become large, rendering the median-based ratio ineffective (yielding a ratio of ~1.02 instead of >10).
+    *   *Adaptation:* We updated the engine to explicitly use "Leave-One-Out" (LOO) residual analysis to identify specific errors (e.g., "Likely X/Y axis swap" or "Misplaced point"). These specific diagnoses are now surfaced in the UI.
+2. **React Layout Frustrations:** Complex nesting of Flexbox containers led to the classic "constricted grey frame" bug where the canvas refused to expand.
+    *   *Adaptation:* Implemented strict `min-height: 0` and `flex: 1` boundaries on parent containers to ensure the `ImageCanvas` correctly consumed all available viewport space.
+3. **Data Onboarding:** Initial UAT revealed that jumping straight to a "New Project" modal confused users if they hadn't loaded an image yet. 
+    *   *Adaptation:* We refined the startup flow. The app now loads into a "Ready" state, allowing users to Open an image first, which then seamlessly triggers the project initialization modal. Extensive UI hints and onboarding text were added to empty states.
+
+---
+
+## 7. Current Known Issues (Pending Scientific Verification)
+
+### Scale Bar & Proxy Derivation Precision
+Currently, the scale bar and the "Pixel Proxy" estimates (displayed in grey italics) rely on calculating a global pixels-per-unit ratio derived from the linear distance between reference points. 
+
+**The Problem:** In scenarios involving significant image rotation, sheer, or differing aspect ratios between the image capture hardware and the secondary instrument stage, this linear Euclidean distance calculation can introduce scale drift, resulting in inaccurate proxy coordinate predictions.
+
+**Required Action:** 
+To repair the scaling issue, we require more accurate empirical data from the instruments. 
+1. **Data Needed:** Calibration grid mappings or specific known-distance stage movements.
+2. **Potential Fixes:** 
+    - Decouple the X-axis and Y-axis scaling factors (calculating scale independently for each vector).
+    - If the instruments demonstrate severe non-uniform scaling, we may need to upgrade the mathematical engine from a **Similarity Transform** (Rotation + uniform Scale + Translation) to a full **Affine Transform** (Rotation + independent X/Y Scale + Sheer + Translation).

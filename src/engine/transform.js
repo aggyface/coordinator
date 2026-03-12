@@ -59,9 +59,6 @@ export function computeTransform(referencePairs) {
 
 /**
  * Applies a similarity transform to a coordinate.
- * @param {object} oldCoord { x, y }
- * @param {object} transform Transform parameters
- * @returns {object} { x, y }
  */
 export function applyTransform(oldCoord, transform) {
   const { x, y } = oldCoord;
@@ -74,9 +71,6 @@ export function applyTransform(oldCoord, transform) {
 
 /**
  * Calculates residuals for each reference pair under a given transform.
- * @param {Array} referencePairs Array of { id, oldCoord, newCoord }
- * @param {object} transform Transform parameters
- * @returns {Array} [{ id, oldCoord, newCoord, calculated, residual }]
  */
 export function computeResiduals(referencePairs, transform) {
   return referencePairs.map(pair => {
@@ -93,17 +87,14 @@ export function computeResiduals(referencePairs, transform) {
 
 /**
  * Recomputes all coordinates for all points across all instruments.
- * @param {object} session The project session state
- * @returns {Map} Map<pointId, Map<instrumentId, { x, y, isProxy }>>
  */
 export function computeAllCoords(session) {
   const results = new Map();
   const transforms = new Map();
   const instruments = session.instruments;
   const sourceInstrument = instruments.find(inst => inst.isSource);
-  if (!sourceInstrument) return results;
+  if (!sourceInstrument) return { results, transforms };
 
-  // Topological sort based on transformFrom dependency
   const sortedInstruments = [];
   const visited = new Set();
   const visit = (inst) => {
@@ -117,7 +108,6 @@ export function computeAllCoords(session) {
 
   for (const inst of sortedInstruments) {
     if (inst.isSource) continue;
-
     const parentId = inst.transformFrom;
     const referencePairs = session.points
       .filter(p => p.enteredCoords[inst.id] && p.enteredCoords[parentId])
@@ -128,50 +118,40 @@ export function computeAllCoords(session) {
       }));
 
     const transform = computeTransform(referencePairs);
-    if (transform) transforms.set(inst.id, transform);
+    if (transform) {
+      const quality = assessTransformQuality(referencePairs, transform);
+      transforms.set(inst.id, { ...transform, ...quality });
+    }
   }
 
   for (const point of session.points) {
     const pointMap = new Map();
     results.set(point.id, pointMap);
-
-    // Start with source instrument (always has coordinates)
     const sourceCoords = point.enteredCoords[sourceInstrument.id];
-    if (sourceCoords) {
-      pointMap.set(sourceInstrument.id, { ...sourceCoords, isProxy: false });
-    }
+    if (sourceCoords) pointMap.set(sourceInstrument.id, { ...sourceCoords, isProxy: false });
 
-    // Propagate through the chain
     for (const inst of sortedInstruments) {
       if (inst.isSource) continue;
-      
       const parentId = inst.transformFrom;
       const parentCoords = pointMap.get(parentId);
-      
       if (point.enteredCoords[inst.id]) {
-        // User explicitly entered coordinates
         pointMap.set(inst.id, { ...point.enteredCoords[inst.id], isProxy: false });
       } else if (parentCoords && transforms.has(inst.id)) {
-        // Calculate based on transform
         const calculated = applyTransform(parentCoords, transforms.get(inst.id));
         pointMap.set(inst.id, { ...calculated, isProxy: false });
       }
     }
   }
-
   return { results, transforms };
 }
 
 /**
  * Checks geometric quality of reference points.
- * @param {Array} referencePairs Array of { oldCoord: {x,y} }
- * @returns {object} { status: 'ok'|'warning'|'degenerate', message: string }
  */
 export function checkGeometry(referencePairs) {
   const n = referencePairs.length;
   if (n < 3) return { status: 'warning', message: 'Fewer than 3 reference points' };
 
-  // Center the points
   const avgX = referencePairs.reduce((sum, p) => sum + p.oldCoord.x, 0) / n;
   const avgY = referencePairs.reduce((sum, p) => sum + p.oldCoord.y, 0) / n;
 
@@ -184,17 +164,12 @@ export function checkGeometry(referencePairs) {
     sxy += dx * dy;
   }
 
-  // Determinant of the covariance matrix
   const covDet = sxx * syy - sxy * sxy;
   const trace = sxx + syy;
-
-  // Normalized collinearity metric (0 = perfectly collinear, 1 = perfectly circular)
-  // For a line, covDet is 0.
   if (Math.abs(covDet) < 1e-10 * (trace * trace + 1e-10)) {
     return { status: 'degenerate', message: 'Reference points are perfectly collinear' };
   }
 
-  // Tight clustering check: hull area vs spread
   const hull = computeConvexHull(referencePairs.map(p => p.oldCoord));
   let area = 0;
   for (let i = 0; i < hull.length; i++) {
@@ -213,14 +188,11 @@ export function checkGeometry(referencePairs) {
   if (area < 0.6 * spreadSq) {
     return { status: 'warning', message: 'Reference points are tightly clustered' };
   }
-
   return { status: 'ok', message: '' };
 }
 
 /**
- * Identifies potential outliers using leave-one-out residual analysis.
- * @param {Array} referencePairs Array of { id, oldCoord, newCoord }
- * @returns {Array} [{ id, looResidual, isOutlier }]
+ * Advanced Outlier Detection with Specific Laboratory Error Diagnostics.
  */
 export function detectOutliers(referencePairs) {
   const n = referencePairs.length;
@@ -236,7 +208,16 @@ export function detectOutliers(referencePairs) {
     const dy = pair.newCoord.y - calculated.y;
     const looResidual = Math.sqrt(dx * dx + dy * dy);
     
-    return { id: pair.id, looResidual };
+    // Check for flipped X/Y (common error)
+    const flippedX = pair.newCoord.y;
+    const flippedY = pair.newCoord.x;
+    const flippedResidual = Math.sqrt(Math.pow(flippedX - calculated.x, 2) + Math.pow(flippedY - calculated.y, 2));
+    
+    let diagnosis = null;
+    if (flippedResidual < looResidual * 0.1) diagnosis = 'Likely X/Y axis swap';
+    else if (looResidual > 100) diagnosis = 'Misplaced point or sign error';
+
+    return { id: pair.id, looResidual, diagnosis };
   });
 
   const residuals = results.map(r => r.looResidual).sort((a, b) => a - b);
@@ -250,9 +231,6 @@ export function detectOutliers(referencePairs) {
 
 /**
  * Assesses the quality of a transform based on RMSE vs Median Residual.
- * @param {Array} referencePairs Array of { id, oldCoord, newCoord }
- * @param {object} transform The transform to assess
- * @returns {object} { status: 'ok'|'warning'|'blocked', rmse, medianResidual, ratio }
  */
 export function assessTransformQuality(referencePairs, transform) {
   const residuals = computeResiduals(referencePairs, transform).map(r => r.residual).sort((a, b) => a - b);
@@ -262,33 +240,26 @@ export function assessTransformQuality(referencePairs, transform) {
     : residuals[Math.floor(n / 2)];
   
   const ratio = transform.rmse / (medianResidual || 1e-10);
-
   let status = 'ok';
   
-  // Rule 1: RMSE / Median ratio (per brief)
   if (ratio > 10) status = 'blocked';
   else if (ratio > 5) status = 'warning';
 
-  // Rule 2: Explicit outlier detection (Scientific requirement for small sets)
   const outliers = detectOutliers(referencePairs);
   if (outliers.length > 0 && transform.rmse > 0.1) {
     status = 'blocked';
   }
 
-  return { status, rmse: transform.rmse, medianResidual, ratio };
+  return { status, rmse: transform.rmse, medianResidual, ratio, outliers };
 }
 
 /**
  * Classifies a point's location relative to the reference hull.
- * @param {object} coord { x, y }
- * @param {Array} referencePairs Reference points
- * @returns {object} { status: 'inside'|'near'|'outside'|'far', distanceOutside }
  */
 export function classifyPointLocation(coord, referencePairs) {
   const coords = referencePairs.map(p => p.oldCoord);
   const hull = computeConvexHull(coords);
   const isInside = isInsideConvexHull(coord, hull);
-
   if (isInside) return { status: 'inside', distanceOutside: 0 };
 
   const minX = Math.min(...coords.map(c => c.x));
@@ -296,7 +267,6 @@ export function classifyPointLocation(coord, referencePairs) {
   const minY = Math.min(...coords.map(c => c.y));
   const maxY = Math.max(...coords.map(c => c.y));
   const spread = Math.max(maxX - minX, maxY - minY);
-  
   const dx = coord.x - (minX + maxX) / 2;
   const dy = coord.y - (minY + maxY) / 2;
   const dist = Math.sqrt(dx * dx + dy * dy);
@@ -308,7 +278,6 @@ export function classifyPointLocation(coord, referencePairs) {
 
 /**
  * Computes the cumulative RMSE along an instrument chain.
- * @returns {object|null}
  */
 export function computeChainedRMSE(instrumentId, instruments, transforms) {
   const inst = instruments.find(i => i.id === instrumentId);
@@ -324,48 +293,31 @@ export function computeChainedRMSE(instrumentId, instruments, transforms) {
     if (!parent) break;
     chainDescription = `${parent.name} → ${chainDescription}`;
     if (parent.isSource) break;
-
     const parentRMSE = (transforms instanceof Map ? transforms.get(currentId) : transforms[currentId])?.rmse || 0;
     chainSqSum += parentRMSE * parentRMSE;
     currentId = parent.transformFrom;
   }
-
-  return {
-    localRMSE,
-    chainRMSE: Math.sqrt(chainSqSum),
-    chainDescription
-  };
+  return { localRMSE, chainRMSE: Math.sqrt(chainSqSum), chainDescription };
 }
 
 /**
  * Computes a 2D convex hull using the Monotone Chain algorithm.
- * @param {Array} coords Array of { x, y }
- * @returns {Array} Array of { x, y } defining the hull
  */
 export function computeConvexHull(coords) {
   if (coords.length <= 2) return coords;
-
   const points = [...coords].sort((a, b) => a.x !== b.x ? a.x - b.x : a.y - b.y);
-
   const crossProduct = (a, b, c) => (b.x - a.x) * (c.y - a.y) - (b.y - a.y) * (c.x - a.x);
-
   const lower = [];
   for (const p of points) {
-    while (lower.length >= 2 && crossProduct(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) {
-      lower.pop();
-    }
+    while (lower.length >= 2 && crossProduct(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) lower.pop();
     lower.push(p);
   }
-
   const upper = [];
   for (let i = points.length - 1; i >= 0; i--) {
     const p = points[i];
-    while (upper.length >= 2 && crossProduct(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) {
-      upper.pop();
-    }
+    while (upper.length >= 2 && crossProduct(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) upper.pop();
     upper.push(p);
   }
-
   upper.pop();
   lower.pop();
   return lower.concat(upper);
@@ -373,18 +325,13 @@ export function computeConvexHull(coords) {
 
 /**
  * Checks if a point is inside a polygon.
- * @param {object} point { x, y }
- * @param {Array} hull Array of { x, y }
- * @returns {boolean}
  */
 export function isInsideConvexHull(point, hull) {
   let inside = false;
   for (let i = 0, j = hull.length - 1; i < hull.length; j = i++) {
     const xi = hull[i].x, yi = hull[i].y;
     const xj = hull[j].x, yj = hull[j].y;
-
-    const intersect = ((yi > point.y) !== (yj > point.y)) &&
-        (point.x < (xj - xi) * (point.y - yi) / (yj - yi) + xi);
+    const intersect = ((yi > point.y) !== (yj > point.y)) && (point.x < (xj - xi) * (point.y - yi) / (yj - yi) + xi);
     if (intersect) inside = !inside;
   }
   return inside;
@@ -395,32 +342,19 @@ export function isInsideConvexHull(point, hull) {
  */
 export function computeLocalScale(pixelCoord, referencePairs, instrumentUnits) {
   if (referencePairs.length < 2) return { scale: null, confidence: 'none', pairsUsed: 0 };
-
-  // Calculate scales between all pairs of references
   const scales = [];
   for (let i = 0; i < referencePairs.length; i++) {
     for (let j = i + 1; j < referencePairs.length; j++) {
       const p1 = referencePairs[i];
       const p2 = referencePairs[j];
-      
-      const dxPx = p1.oldCoord.x - p2.oldCoord.x;
-      const dyPx = p1.oldCoord.y - p2.oldCoord.y;
-      const distPx = Math.sqrt(dxPx * dxPx + dyPx * dyPx);
-
-      const dxInst = p1.newCoord.x - p2.newCoord.x;
-      const dyInst = p1.newCoord.y - p2.newCoord.y;
-      const distInst = Math.sqrt(dxInst * dxInst + dyInst * dyInst);
-
+      const distPx = Math.sqrt(Math.pow(p1.oldCoord.x - p2.oldCoord.x, 2) + Math.pow(p1.oldCoord.y - p2.oldCoord.y, 2));
+      const distInst = Math.sqrt(Math.pow(p1.newCoord.x - p2.newCoord.x, 2) + Math.pow(p1.newCoord.y - p2.newCoord.y, 2));
       if (distPx > 1) scales.push(distInst / distPx);
     }
   }
-
   if (scales.length === 0) return { scale: null, confidence: 'none', pairsUsed: 0 };
-
   const medianScale = scales.sort((a, b) => a - b)[Math.floor(scales.length / 2)];
-  const confidence = referencePairs.length >= 4 ? 'good' : 'estimated';
-
-  return { scale: medianScale, confidence, pairsUsed: referencePairs.length };
+  return { scale: medianScale, confidence: referencePairs.length >= 4 ? 'good' : 'estimated', pairsUsed: referencePairs.length };
 }
 
 /**
@@ -428,49 +362,21 @@ export function computeLocalScale(pixelCoord, referencePairs, instrumentUnits) {
  */
 export function applyPixelProxy(pixelCoord, referencePairs, instrument) {
   const scaleResult = computeLocalScale(pixelCoord, referencePairs, instrument.units);
-  
-  if (scaleResult.confidence === 'none') {
-    return { x: pixelCoord.x, y: pixelCoord.y, label: 'unscaled px (proxy)', confidence: 'none' };
-  }
-
-  // Use the centroid as a crude origin for proxy calculation
-  const centroidPx = {
-    x: referencePairs.reduce((sum, p) => sum + p.oldCoord.x, 0) / referencePairs.length,
-    y: referencePairs.reduce((sum, p) => sum + p.oldCoord.y, 0) / referencePairs.length
-  };
-  const centroidInst = {
-    x: referencePairs.reduce((sum, p) => sum + p.newCoord.x, 0) / referencePairs.length,
-    y: referencePairs.reduce((sum, p) => sum + p.newCoord.y, 0) / referencePairs.length
-  };
-
+  if (scaleResult.confidence === 'none') return { x: pixelCoord.x, y: pixelCoord.y, label: 'unscaled px', confidence: 'none' };
+  const centroidPx = { x: referencePairs.reduce((sum, p) => sum + p.oldCoord.x, 0) / referencePairs.length, y: referencePairs.reduce((sum, p) => sum + p.oldCoord.y, 0) / referencePairs.length };
+  const centroidInst = { x: referencePairs.reduce((sum, p) => sum + p.newCoord.x, 0) / referencePairs.length, y: referencePairs.reduce((sum, p) => sum + p.newCoord.y, 0) / referencePairs.length };
   const x = centroidInst.x + (pixelCoord.x - centroidPx.x) * scaleResult.scale;
   const y = centroidInst.y + (pixelCoord.y - centroidPx.y) * scaleResult.scale;
-
-  return {
-    x, y,
-    label: `~${scaleResult.scale.toFixed(2)} ${instrument.units}/px (proxy)`,
-    confidence: scaleResult.confidence
-  };
+  return { x, y, label: `~${scaleResult.scale.toFixed(2)} ${instrument.units}/px`, confidence: scaleResult.confidence };
 }
 
 /**
  * Parses a coordinate input string.
- * @param {string} rawInput User input
- * @returns {object} { value, error, warning }
  */
 export function parseCoordinate(rawInput) {
   if (!rawInput || rawInput.trim() === '') return { value: null, error: 'Required' };
-
-  let processed = rawInput.trim().replace(',', '.'); // Handle European comma
-  
-  // Strip common unit suffixes
-  processed = processed.replace(/[a-zA-Zµ\s]+$/, '');
-
+  let processed = rawInput.trim().replace(',', '.').replace(/[a-zA-Zµ\s]+$/, '');
   const value = parseFloat(processed);
   if (isNaN(value)) return { value: null, error: 'Not a valid number' };
-
-  let warning = null;
-  if (rawInput.includes(',')) warning = 'Interpreted as decimal point';
-  
-  return { value, warning };
+  return { value, warning: rawInput.includes(',') ? 'Interpreted as decimal point' : null };
 }

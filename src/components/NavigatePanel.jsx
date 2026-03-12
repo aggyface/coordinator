@@ -1,45 +1,75 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { applyPixelProxy } from '../engine/transform';
 
 /**
  * NavigatePanel Component.
  * Optimized for active lab workflow: PiP view, tag filtering, and sequential navigation.
  */
-export default function NavigatePanel({ session, computedCoords, activeInstrumentId, onSelect, selectedPointId, onClose }) {
+export default function NavigatePanel({ 
+  session, 
+  computedCoords, 
+  activeInstrumentId, 
+  onSelect, 
+  selectedPointId, 
+  onToggleAnalysed,
+  onCenter 
+}) {
   const [filterTag, setFilterTag] = useState({ category: '', value: '' });
   const pipCanvasRef = useRef(null);
 
-  // 1. Get all analysis points (points not used as refs for this instrument)
-  const allAnalysisPoints = useMemo(() => {
-    return session.points.filter(p => !p.enteredCoords[activeInstrumentId]);
-  }, [session.points, activeInstrumentId]);
+  // 1. All points are targets
+  const allPoints = session.points || [];
 
   // 2. Apply tag filter
   const filteredPoints = useMemo(() => {
-    if (!filterTag.category || !filterTag.value) return allAnalysisPoints;
-    return allAnalysisPoints.filter(p => p.tags[filterTag.category] === filterTag.value);
-  }, [allAnalysisPoints, filterTag]);
+    if (!filterTag.category) return allPoints;
+    if (!filterTag.value) return allPoints.filter(p => p.tags.hasOwnProperty(filterTag.category));
+    return allPoints.filter(p => p.tags[filterTag.category] === filterTag.value);
+  }, [allPoints, filterTag]);
+
+  // AUTO-SELECT: When filter changes, select first matching point
+  useEffect(() => {
+    if (filteredPoints.length > 0 && !filteredPoints.find(p => p.id === selectedPointId)) {
+      onSelect(filteredPoints[0].id);
+    }
+  }, [filterTag, filteredPoints, onSelect, selectedPointId]);
 
   const currentIndex = filteredPoints.findIndex(p => p.id === selectedPointId);
   const currentPoint = filteredPoints[currentIndex];
   const total = filteredPoints.length;
 
-  // 3. Coordinate readout
-  const coords = currentPoint ? computedCoords?.get(currentPoint.id)?.get(activeInstrumentId) : null;
+  // 3. Coordinate readout logic
+  const activeInst = session.instruments.find(i => i.id === activeInstrumentId);
+  const manualCoords = currentPoint?.enteredCoords[activeInstrumentId];
+  const computedResult = currentPoint ? computedCoords?.get(currentPoint.id)?.get(activeInstrumentId) : null;
+
+  let displayCoords = computedResult;
+  let isProxy = !manualCoords;
+
+  if (!displayCoords && currentPoint && activeInst) {
+    const refs = session.points
+      .filter(p => p.enteredCoords[activeInstrumentId])
+      .map(p => ({ oldCoord: p.pixelCoords, newCoord: p.enteredCoords[activeInstrumentId] }));
+    
+    const proxy = applyPixelProxy(currentPoint.pixelCoords, refs, activeInst);
+    if (proxy.confidence !== 'none') {
+      displayCoords = { x: proxy.x, y: proxy.y };
+      isProxy = true;
+    }
+  }
 
   /**
    * Render PiP Thumbnail
    */
   useEffect(() => {
     const canvas = pipCanvasRef.current;
-    if (!canvas || !currentPoint || !window.imageBitmap) return; // Note: accessing bitmap globally or via prop
+    if (!canvas || !currentPoint || !window.imageBitmap) return;
 
     const ctx = canvas.getContext('2d');
     const size = canvas.width;
     ctx.clearRect(0, 0, size, size);
 
-    // Draw zoomed-in crop centered on point
-    const zoom = 2; // 2x relative to full image
-    const sourceSize = 200; // px in image
+    const sourceSize = 200;
     ctx.drawImage(
       window.imageBitmap,
       currentPoint.pixelCoords.x - sourceSize / 2,
@@ -48,7 +78,6 @@ export default function NavigatePanel({ session, computedCoords, activeInstrumen
       0, 0, size, size
     );
 
-    // Draw target crosshair
     ctx.strokeStyle = '#00ffff';
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -69,10 +98,8 @@ export default function NavigatePanel({ session, computedCoords, activeInstrumen
     <div style={styles.container}>
       <div style={styles.header}>
         <h3 style={styles.title}>Navigate Mode</h3>
-        <button onClick={onClose} style={styles.closeBtn}>Exit</button>
       </div>
 
-      {/* Filter Section */}
       <div style={styles.section}>
         <label style={styles.label}>Filter by Tag:</label>
         <div style={{ display: 'flex', gap: 4 }}>
@@ -81,7 +108,7 @@ export default function NavigatePanel({ session, computedCoords, activeInstrumen
             value={filterTag.category}
             onChange={e => setFilterTag({ category: e.target.value, value: '' })}
           >
-            <option value="">All Categories</option>
+            <option value="">All Points</option>
             {session.tagCategories.map(c => <option key={c.id} value={c.name}>{c.name}</option>)}
           </select>
           <select 
@@ -98,30 +125,52 @@ export default function NavigatePanel({ session, computedCoords, activeInstrumen
         </div>
       </div>
 
-      {/* Point Counter */}
       <div style={styles.counter}>
-        Point {currentIndex + 1} of {total}
+        {total > 0 ? `Point ${currentIndex + 1} of ${total}` : 'No matches'}
       </div>
 
-      {/* Main Display */}
       {currentPoint ? (
         <div style={styles.display}>
-          <div style={styles.name}>{currentPoint.name}</div>
+          <div style={styles.nameHeader}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={styles.name}>{currentPoint.name}</div>
+              <button 
+                onClick={() => onCenter(currentPoint.id)}
+                style={styles.miniCenterBtn}
+                title="Center View"
+              >◎</button>
+            </div>
+            <label style={styles.analysedLabel}>
+              <input 
+                type="checkbox" 
+                checked={currentPoint.isAnalysed} 
+                onChange={() => onToggleAnalysed(currentPoint.id)}
+              />
+              <span>Analysed</span>
+            </label>
+          </div>
           
           <div style={styles.pipBox}>
             <canvas ref={pipCanvasRef} width={200} height={200} style={styles.pip} />
           </div>
 
-          <div style={styles.coordCard}>
+          <div style={{ ...styles.coordCard, borderColor: isProxy ? '#666' : '#00ffff' }}>
             <div style={styles.coordRow}>
               <span style={styles.axis}>X</span>
-              <span style={styles.value}>{coords?.x.toFixed(4)}</span>
+              <span style={{ ...styles.value, color: isProxy ? '#888' : '#fff', fontStyle: isProxy ? 'italic' : 'normal' }}>
+                {displayCoords ? displayCoords.x.toFixed(4) : 'N/A'}
+              </span>
             </div>
             <div style={styles.coordRow}>
               <span style={styles.axis}>Y</span>
-              <span style={styles.value}>{coords?.y.toFixed(4)}</span>
+              <span style={{ ...styles.value, color: isProxy ? '#888' : '#fff', fontStyle: isProxy ? 'italic' : 'normal' }}>
+                {displayCoords ? displayCoords.y.toFixed(4) : 'N/A'}
+              </span>
             </div>
-            <div style={styles.unit}>{session.instruments.find(i => i.id === activeInstrumentId)?.units}</div>
+            <div style={styles.unit}>
+              {isProxy ? '(Calculated Estimate)' : 'Verified Coordinate'} 
+              {' '}{activeInst?.units}
+            </div>
           </div>
 
           {currentPoint.notes && (
@@ -129,15 +178,14 @@ export default function NavigatePanel({ session, computedCoords, activeInstrumen
           )}
         </div>
       ) : (
-        <div style={styles.empty}>No analysis points match your filter.</div>
+        <div style={styles.empty}>No points match your selection.</div>
       )}
 
       <div style={{ flex: 1 }} />
 
-      {/* Footer Nav */}
       <div style={styles.footer}>
         <button onClick={prev} disabled={currentIndex <= 0} style={styles.navBtn}>Previous</button>
-        <button onClick={next} disabled={currentIndex >= total - 1} style={styles.navBtn}>Next Point</button>
+        <button onClick={next} disabled={currentIndex >= total - 1 || total === 0} style={styles.navBtn}>Next Point</button>
       </div>
     </div>
   );
@@ -147,13 +195,18 @@ const styles = {
   container: { display: 'flex', flexDirection: 'column', gap: 16, height: '100%' },
   header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
   title: { margin: 0, fontSize: 18, color: '#00ffff' },
-  closeBtn: { background: 'none', border: 'none', color: '#888', cursor: 'pointer' },
   section: { display: 'flex', flexDirection: 'column', gap: 6 },
   label: { fontSize: 11, color: '#888', textTransform: 'uppercase' },
   input: { backgroundColor: '#1a1a1a', color: '#fff', border: '1px solid #444', padding: 6, borderRadius: 4, fontSize: 12 },
   counter: { fontSize: 12, color: '#aaa', textAlign: 'center', backgroundColor: '#333', padding: '4px 0', borderRadius: 4 },
   display: { display: 'flex', flexDirection: 'column', gap: 16, alignItems: 'center' },
+  nameHeader: { alignSelf: 'stretch', display: 'flex', justifyContent: 'space-between', alignItems: 'center' },
   name: { fontSize: 24, fontWeight: 'bold', color: '#fff' },
+  analysedLabel: { display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, color: '#4caf50', cursor: 'pointer' },
+  miniCenterBtn: { 
+    background: 'none', border: 'none', color: '#00ffff', cursor: 'pointer', 
+    fontSize: 20, padding: 0, lineHeight: 1, opacity: 0.7 
+  },
   pipBox: { border: '2px solid #444', borderRadius: 8, overflow: 'hidden', backgroundColor: '#000', width: 200, height: 200 },
   pip: { display: 'block' },
   coordCard: { 

@@ -8,7 +8,6 @@ import { parseCoordinate, applyPixelProxy } from '../engine/transform';
 export default function PointModal({ point, session, onSave, onClose, onDelete }) {
   const [formData, setEditData] = useState(null);
 
-  // Sync internal state when the active point changes
   useEffect(() => {
     if (point) {
       setEditData({
@@ -36,7 +35,6 @@ export default function PointModal({ point, session, onSave, onClose, onDelete }
   };
 
   const save = () => {
-    // Process coordinate strings into numbers before saving
     const processedCoords = {};
     Object.entries(formData.enteredCoords).forEach(([instId, coords]) => {
       const parsedX = parseCoordinate(String(coords.x || ''));
@@ -68,7 +66,6 @@ export default function PointModal({ point, session, onSave, onClose, onDelete }
         </div>
 
         <div style={styles.body}>
-          {/* 1. Coordinate Table */}
           <section style={styles.section}>
             <h4 style={styles.sectionTitle}>Instrument Coordinates</h4>
             <table style={styles.table}>
@@ -86,10 +83,11 @@ export default function PointModal({ point, session, onSave, onClose, onDelete }
                   const isEntered = entry.x !== null && entry.x !== undefined && entry.x !== '';
                   
                   // Calculate proxy if not entered
-                  const proxy = !isEntered ? applyPixelProxy(point.pixelCoords, session.points.filter(p => p.enteredCoords[inst.id]).map(p => ({
-                    oldCoord: p.pixelCoords,
-                    newCoord: p.enteredCoords[inst.id]
-                  })), inst) : null;
+                  const refs = session.points
+                    .filter(p => p.enteredCoords[inst.id])
+                    .map(p => ({ oldCoord: p.pixelCoords, newCoord: p.enteredCoords[inst.id] }));
+                  
+                  const proxy = !isEntered ? applyPixelProxy(point.pixelCoords, refs, inst) : null;
 
                   return (
                     <tr key={inst.id}>
@@ -97,20 +95,28 @@ export default function PointModal({ point, session, onSave, onClose, onDelete }
                         {inst.name} <span style={styles.unit}>({inst.units})</span>
                       </td>
                       <td>
-                        <input 
-                          value={entry.x ?? ''} 
-                          placeholder={proxy?.x?.toFixed(2) ?? ''}
-                          onChange={e => handleInputChange(inst.id, 'x', e.target.value)}
-                          style={styles.coordInput}
-                        />
+                        <div style={{ position: 'relative' }}>
+                          <input 
+                            value={entry.x ?? ''} 
+                            onChange={e => handleInputChange(inst.id, 'x', e.target.value)}
+                            style={styles.coordInput}
+                          />
+                          {!isEntered && proxy?.confidence !== 'none' && (
+                            <span style={styles.proxyHint}>{proxy.x.toFixed(2)}</span>
+                          )}
+                        </div>
                       </td>
                       <td>
-                        <input 
-                          value={entry.y ?? ''} 
-                          placeholder={proxy?.y?.toFixed(2) ?? ''}
-                          onChange={e => handleInputChange(inst.id, 'y', e.target.value)}
-                          style={styles.coordInput}
-                        />
+                        <div style={{ position: 'relative' }}>
+                          <input 
+                            value={entry.y ?? ''} 
+                            onChange={e => handleInputChange(inst.id, 'y', e.target.value)}
+                            style={styles.coordInput}
+                          />
+                          {!isEntered && proxy?.confidence !== 'none' && (
+                            <span style={styles.proxyHint}>{proxy.y.toFixed(2)}</span>
+                          )}
+                        </div>
                       </td>
                       <td style={{ fontSize: 11, color: isEntered ? '#4caf50' : '#888' }}>
                         {isEntered ? 'Manual' : (proxy?.confidence !== 'none' ? `Proxy (${proxy.confidence})` : 'No Data')}
@@ -122,30 +128,36 @@ export default function PointModal({ point, session, onSave, onClose, onDelete }
             </table>
           </section>
 
-          {/* 2. Tags & Description */}
           <div style={styles.row}>
             <section style={{ ...styles.section, flex: 1 }}>
               <h4 style={styles.sectionTitle}>Tags</h4>
-              <div style={styles.tagGrid}>
-                {session.tagCategories.map(cat => (
-                  <div key={cat.id} style={styles.tagGroup}>
-                    <label style={styles.tagLabel}>{cat.name}</label>
-                    <select 
-                      value={formData.tags[cat.name] || ''} 
-                      onChange={e => setEditData({
-                        ...formData,
-                        tags: { ...formData.tags, [cat.name]: e.target.value }
-                      })}
-                      style={styles.tagSelect}
-                    >
-                      <option value="">(None)</option>
-                      {cat.values.map(val => (
-                        <option key={val.label} value={val.label}>{val.label}</option>
-                      ))}
-                    </select>
-                  </div>
-                ))}
-              </div>
+              
+              {session.tagCategories.length === 0 ? (
+                <div style={styles.tagOnboarding}>
+                  <strong>Tip:</strong> No tags defined yet. Use the <strong>Tags ⚙</strong> button in the top bar to create categories like Mineralogy or Priority.
+                </div>
+              ) : (
+                <div style={styles.tagGrid}>
+                  {session.tagCategories.map(cat => (
+                    <div key={cat.id} style={styles.tagGroup}>
+                      <label style={styles.tagLabel}>{cat.name}</label>
+                      <select 
+                        value={formData.tags[cat.name] || ''} 
+                        onChange={e => setEditData({
+                          ...formData,
+                          tags: { ...formData.tags, [cat.name]: e.target.value }
+                        })}
+                        style={styles.tagSelect}
+                      >
+                        <option value="">(None)</option>
+                        {cat.values.map(val => (
+                          <option key={val.label} value={val.label}>{val.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                  ))}
+                </div>
+              )}
             </section>
 
             <section style={{ ...styles.section, flex: 1 }}>
@@ -195,7 +207,17 @@ const styles = {
   unit: { color: '#888', fontSize: 12 },
   coordInput: { 
     backgroundColor: '#1a1a1a', color: '#fff', border: '1px solid #555', 
-    padding: '6px 8px', borderRadius: 4, width: '90%', fontFamily: 'monospace' 
+    padding: '6px 8px', borderRadius: 4, width: '100%', fontFamily: 'monospace',
+    boxSizing: 'border-box'
+  },
+  proxyHint: {
+    position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)',
+    color: '#888', fontStyle: 'italic', fontSize: 12, pointerEvents: 'none',
+    opacity: 0.6
+  },
+  tagOnboarding: {
+    backgroundColor: '#1a1a1a', border: '1px dashed #555', borderRadius: 6,
+    padding: 12, fontSize: 12, color: '#aaa', lineHeight: 1.4
   },
   row: { display: 'flex', gap: 24 },
   tagGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 12 },
@@ -207,6 +229,6 @@ const styles = {
     border: '1px solid #555', borderRadius: 4, padding: 8, boxSizing: 'border-box' 
   },
   footer: { padding: 16, borderTop: '1px solid #444', display: 'flex', gap: 12 },
-  saveBtn: { backgroundColor: '#007bff', border: 'none' },
-  deleteBtn: { backgroundColor: 'transparent', color: '#ff4d4d', border: '1px solid #ff4d4d' }
+  saveBtn: { backgroundColor: '#007bff', border: 'none', color: '#fff', padding: '10px 20px', borderRadius: 4, cursor: 'pointer' },
+  deleteBtn: { backgroundColor: 'transparent', color: '#ff4d4d', border: '1px solid #ff4d4d', padding: '10px 20px', borderRadius: 4, cursor: 'pointer' }
 };

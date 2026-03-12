@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import useSession from './hooks/useSession';
 import { decodeImage } from './engine/imageLoader';
 import { generateCSV, triggerDownload } from './engine/exportUtils';
@@ -32,6 +32,7 @@ export default function App() {
     addPoint,
     updatePoint,
     deletePoint,
+    toggleAnalysed,
     updateTagCategories,
     saveSession,
     loadSession,
@@ -41,26 +42,45 @@ export default function App() {
   const [mode, setMode] = useState('Select');
   const [activeInstrumentId, setActiveInstrumentId] = useState(null);
   const [selectedPointId, setSelectedPointId] = useState(null);
+  const [hoveredPointId, setHoveredPointId] = useState(null);
   const [isTagDrawerOpen, setIsTagDrawerOpen] = useState(false);
   const [isNewProjectOpen, setIsNewProjectOpen] = useState(false);
+  const [isEditingMetadata, setIsEditingMetadata] = useState(false);
+  const [isImageLoading, setIsImageLoading] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+  const [showLegend, setShowLegend] = useState(true);
+  const [showScaleBar, setShowScaleBar] = useState(true);
+  
+  const canvasControlRef = React.useRef(null);
 
-  // Automatic image decoding whenever the buffer changes (e.g. after loading a .labcoord)
+  // Automatic image decoding whenever the buffer changes
   useEffect(() => {
     if (imageBuffer && !imageBitmap) {
-      decodeImage(imageBuffer).then(bitmap => {
-        setImageBitmap(bitmap);
-        window.imageBitmap = bitmap; // Expose for PiP access
-      }).catch(console.error);
+      setIsImageLoading(true);
+      setTimeout(() => {
+        decodeImage(imageBuffer).then(bitmap => {
+          setImageBitmap(bitmap);
+          window.imageBitmap = bitmap;
+          setIsImageLoading(false);
+        }).catch(err => {
+          console.error(err);
+          setIsImageLoading(false);
+          alert("Failed to decode image.");
+        });
+      }, 50);
     }
   }, [imageBuffer, imageBitmap, setImageBitmap]);
 
   const handleCreateProject = (data) => {
     setSessionMetadata(data.projectName, data.sampleId);
-    addInstrument(data.sourceInstrument);
+    if (data.sourceInstrument) {
+      addInstrument(data.sourceInstrument);
+    }
     setIsNewProjectOpen(false);
+    setIsEditingMetadata(false);
   };
 
-  // Sync activeInstrumentId when instruments are added if none is selected
+  // Sync activeInstrumentId
   useEffect(() => {
     if (!activeInstrumentId && session.instruments.length > 0) {
       setActiveInstrumentId(session.instruments[0].id);
@@ -72,13 +92,13 @@ export default function App() {
   const handleFileOpen = async (file) => {
     if (file.name.endsWith('.labcoord')) {
       await loadSession(file);
+      setActiveInstrumentId(null);
     } else {
-      // Treat as raw image import
       const buffer = await file.arrayBuffer();
       setImageBuffer(buffer);
-      const bitmap = await decodeImage(buffer, file.name);
-      setImageBitmap(bitmap);
-      window.imageBitmap = bitmap;
+      if (session.instruments.length === 0) {
+        setIsNewProjectOpen(true);
+      }
     }
   };
 
@@ -88,7 +108,7 @@ export default function App() {
       triggerDownload(blob, `${session.projectName || 'project'}.labcoord`, 'application/zip');
     } catch (err) {
       console.error('Save failed:', err);
-      alert('Failed to save project. See console for details.');
+      alert('Failed to save project.');
     }
   };
 
@@ -101,43 +121,74 @@ export default function App() {
 
   const handleExportImage = async () => {
     if (!imageBitmap) return;
+    setIsExporting(true);
     try {
-      // Create a clone for the worker so the main thread keeps its version
       const clone = await createImageBitmap(imageBitmap);
       const blob = await import('./engine/exportUtils').then(m => 
-        m.generateAnnotatedImage(clone, session.points, activeInstrumentId, session.tagCategories)
+        m.generateAnnotatedImage(
+          clone, 
+          session.points, 
+          activeInstrumentId, 
+          session.tagCategories, 
+          showLegend, 
+          showScaleBar,
+          transforms
+        )
       );
       triggerDownload(blob, `${session.projectName}_Annotated.png`, 'image/png');
     } catch (err) {
       console.error('Image export failed:', err);
       alert('Failed to export image.');
+    } finally {
+      setIsExporting(false);
     }
   };
 
+  const centerOnPoint = useCallback((pointId) => {
+    const point = session.points.find(p => p.id === pointId);
+    if (point && canvasControlRef.current) {
+      canvasControlRef.current.centerOn(point.pixelCoords.x, point.pixelCoords.y);
+    }
+  }, [session.points]);
+
   return (
-    <div className="app-layout" style={{ display: 'flex', flexDirection: 'column', height: '100vh', backgroundColor: '#242424', color: '#fff' }}>
+    <div className="app-layout" style={{ display: 'flex', flexDirection: 'column', height: '100vh', backgroundColor: '#242424', color: '#fff', overflow: 'hidden' }}>
       <Toolbar 
         session={session} 
         mode={mode} 
-        onModeChange={setMode}
+        showLegend={showLegend}
+        showScaleBar={showScaleBar}
+        onToggleLegend={() => setShowLegend(!showLegend)}
+        onToggleScaleBar={() => setShowScaleBar(!showScaleBar)}
+        onModeChange={(newMode) => {
+          setMode(newMode);
+          if (mode === 'Navigate' && newMode === 'Select') {
+            setSelectedPointId(null); // Fix: Clear selection when exiting Navigate mode
+          }
+        }}
         onTagsOpen={() => setIsTagDrawerOpen(true)}
         onNew={() => setIsNewProjectOpen(true)}
+        onEditMetadata={() => setIsEditingMetadata(true)}
         onSave={handleSave}
         onOpen={handleFileOpen}
         onExportCSV={handleExportCSV}
         onExportImage={handleExportImage}
       />
 
-      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-        <div className="sidebar" style={{ width: 300, borderRight: '1px solid #444', display: 'flex', flexDirection: 'column', padding: 10 }}>
+      <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+        <div className="sidebar" style={{ width: 320, borderRight: '1px solid #444', display: 'flex', flexDirection: 'column', padding: 10 }}>
           {mode === 'Select' && (
             <>
               <PointList 
                 session={session} 
+                imageLoaded={!!imageBitmap}
                 computedCoords={computedCoords}
                 activeInstrumentId={activeInstrumentId}
                 selectedPointId={selectedPointId}
+                hoveredPointId={hoveredPointId}
                 onSelect={setSelectedPointId}
+                onHover={setHoveredPointId}
+                onCenter={centerOnPoint}
               />
               <InstrumentQualityPanel 
                 session={session}
@@ -145,21 +196,24 @@ export default function App() {
                 activeInstrumentId={activeInstrumentId}
                 onSetActive={setActiveInstrumentId}
                 onAddInstrument={addInstrument}
+                onUpdateInstrument={updateInstrument}
               />
             </>
           )}
-          {mode === 'Navigate' && (
+          {mode === 'Navigate' && imageBitmap && (
             <NavigatePanel 
               session={session}
               computedCoords={computedCoords}
               activeInstrumentId={activeInstrumentId}
               selectedPointId={selectedPointId}
               onSelect={setSelectedPointId}
+              onToggleAnalysed={toggleAnalysed}
+              onCenter={centerOnPoint}
               onExportCSV={handleExportCSV}
               onClose={() => setMode('Select')}
             />
           )}
-          {mode === 'Add Point' && (
+          {mode === 'Add Point' && imageBitmap && (
             <AddPointPanel 
               session={session}
               onConfirm={addPoint}
@@ -168,20 +222,40 @@ export default function App() {
           )}
         </div>
 
-        <ImageCanvas 
-          session={session}
-          mode={mode}
-          activeInstrumentId={activeInstrumentId}
-          selectedPointId={selectedPointId}
-          onPointClick={setSelectedPointId}
-          onCanvasClick={(coords) => {
-            if (mode === 'Add Point') {
-              addPoint({ pixelCoords: coords });
-            }
-          }}
-          imageBitmap={imageBitmap}
-          onOpen={handleFileOpen}
-        />
+        <div style={{ flex: 1, position: 'relative', display: 'flex', minWidth: 0 }}>
+          <ImageCanvas 
+            session={session}
+            mode={mode}
+            activeInstrumentId={activeInstrumentId}
+            selectedPointId={selectedPointId}
+            hoveredPointId={hoveredPointId}
+            showLegend={showLegend}
+            showScaleBar={showScaleBar}
+            onPointClick={setSelectedPointId}
+            onHover={setHoveredPointId}
+            onCanvasClick={(coords) => {
+              if (mode === 'Add Point') {
+                addPoint({ pixelCoords: coords });
+              }
+            }}
+            imageBitmap={imageBitmap}
+            onOpen={handleFileOpen}
+            ref={canvasControlRef}
+          />
+          
+          {isImageLoading && (
+            <div style={styles.overlay}>
+              <div style={styles.loaderTitle}>Loading Asset...</div>
+              <div style={styles.loaderSub}>Decoding microscopy data</div>
+            </div>
+          )}
+
+          {isExporting && (
+            <div style={styles.exportIndicator}>
+              Generating High-Res Image...
+            </div>
+          )}
+        </div>
       </div>
 
       <TagDrawer 
@@ -191,22 +265,44 @@ export default function App() {
         onUpdateTags={updateTagCategories}
       />
 
-      <PointModal 
-        point={selectedPoint}
-        session={session}
-        onSave={(updates) => updatePoint(selectedPointId, updates)}
-        onDelete={(id) => {
-          deletePoint(id);
-          setSelectedPointId(null);
-        }}
-        onClose={() => setSelectedPointId(null)}
-      />
+      {mode !== 'Navigate' && (
+        <PointModal 
+          point={selectedPoint}
+          session={session}
+          onSave={(updates) => updatePoint(selectedPointId, updates)}
+          onDelete={(id) => {
+            deletePoint(id);
+            setSelectedPointId(null);
+          }}
+          onClose={() => setSelectedPointId(null)}
+        />
+      )}
 
       <NewProjectModal 
-        isOpen={isNewProjectOpen}
+        isOpen={isNewProjectOpen || isEditingMetadata}
+        session={session}
+        isEdit={isEditingMetadata}
         onCreate={handleCreateProject}
-        onCancel={() => setIsNewProjectOpen(false)}
+        onCancel={() => {
+          setIsNewProjectOpen(false);
+          setIsEditingMetadata(false);
+        }}
       />
     </div>
   );
 }
+
+const styles = {
+  overlay: { 
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, 
+    backgroundColor: 'rgba(0,0,0,0.85)', display: 'flex', flexDirection: 'column', 
+    alignItems: 'center', justifyContent: 'center', zIndex: 1000 
+  },
+  loaderTitle: { fontSize: 24, fontWeight: 'bold', color: '#00ffff' },
+  loaderSub: { fontSize: 14, color: '#aaa', marginTop: 8 },
+  exportIndicator: {
+    position: 'absolute', top: 20, right: 20, backgroundColor: 'rgba(0, 255, 255, 0.2)',
+    border: '1px solid #00ffff', padding: '8px 16px', borderRadius: 20, fontSize: 12,
+    fontWeight: 'bold', color: '#00ffff', backdropFilter: 'blur(4px)', zIndex: 1100
+  }
+};

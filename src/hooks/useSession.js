@@ -98,10 +98,20 @@ export default function useSession() {
           enteredCoords: pointData.enteredCoords || {},
           pixelProxy: [],
           tags: pointData.tags || {},
-          notes: pointData.notes || ""
+          notes: pointData.notes || "",
+          isAnalysed: false
         }]
       };
     });
+  }, [updateSession]);
+
+  const toggleAnalysed = useCallback((id) => {
+    updateSession(prev => ({
+      ...prev,
+      points: prev.points.map(p => 
+        p.id === id ? { ...p, isAnalysed: !p.isAnalysed } : p
+      )
+    }));
   }, [updateSession]);
 
   const updatePoint = useCallback((id, updates) => {
@@ -181,6 +191,7 @@ export default function useSession() {
     addPoint,
     updatePoint,
     deletePoint,
+    toggleAnalysed,
     updateTagCategories,
     saveSession,
     loadSession,

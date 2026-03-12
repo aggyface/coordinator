@@ -4,13 +4,13 @@
  */
 
 import Papa from 'papaparse';
+import { applyPixelProxy } from './transform';
 
 /**
  * Generates an annotated high-resolution PNG via Web Worker.
  */
-export async function generateAnnotatedImage(imageBitmap, points, activeInstrumentId, tagCategories) {
+export async function generateAnnotatedImage(imageBitmap, points, activeInstrumentId, tagCategories, showLegend, showScaleBar, transforms) {
   return new Promise((resolve, reject) => {
-    // Vite handles worker construction via ?worker suffix or standard constructor
     const worker = new Worker(new URL('./exportWorker.js', import.meta.url), { type: 'module' });
 
     worker.onmessage = (e) => {
@@ -28,22 +28,22 @@ export async function generateAnnotatedImage(imageBitmap, points, activeInstrume
       analysis: '#ffeb3b'
     };
 
-    // Transfer the bitmap to the worker (zero-copy)
     worker.postMessage({
       imageBitmap,
       points,
       activeInstrumentId,
       tagCategories,
-      colors
+      colors,
+      showLegend,
+      showScaleBar,
+      transforms
     }, [imageBitmap]); 
-    // Note: imageBitmap is now unusable on the main thread after this call.
-    // In our app, we usually need to re-decode or keep a reference.
-    // For this implementation, we will clone the bitmap or accept that it might need reload.
   });
 }
 
 /**
  * Generates a scientific CSV for the active instrument.
+ * Includes Reliability column and Proxy fallbacks.
  */
 export function generateCSV(session, computedCoords, transforms, activeInstrumentId) {
   const activeInst = session.instruments.find(i => i.id === activeInstrumentId);
@@ -56,26 +56,52 @@ export function generateCSV(session, computedCoords, transforms, activeInstrumen
     data.push({
       "Point Name": "!!! WARNING !!!",
       "Type": "QUALITY ALERT",
-      [`X (${activeInst.units})`]: "High Error",
-      [`Y (${activeInst.units})`]: "Check References",
-      "Notes": `RMSE: ${transform.rmse.toFixed(4)}. Geometry may be degenerate.`
+      "Reliability": "LOW PRECISION",
+      "Analysed": "",
+      [`X (${activeInst?.units || 'units'})`]: "High Error",
+      [`Y (${activeInst?.units || 'units'})`]: "Check References",
+      "Notes": `RMSE: ${transform?.rmse?.toFixed(4)}. Geometry may be degenerate.`
     });
   }
 
   // 2. Process Points
   session.points.forEach(point => {
-    const coords = computedCoords?.get(point.id)?.get(activeInstrumentId);
-    const isRef = !!point.enteredCoords[activeInstrumentId];
+    const manualCoords = point.enteredCoords[activeInstrumentId];
+    const computedResult = computedCoords?.get(point.id)?.get(activeInstrumentId);
+    
+    let x = "N/A", y = "N/A", reliability = "Uncalibrated";
+
+    if (manualCoords) {
+      x = manualCoords.x.toFixed(6);
+      y = manualCoords.y.toFixed(6);
+      reliability = "Verified (Manual)";
+    } else if (computedResult) {
+      x = computedResult.x.toFixed(6);
+      y = computedResult.y.toFixed(6);
+      reliability = "Transform (Calculated)";
+    } else if (activeInst) {
+      // Fallback to Proxy
+      const refs = session.points
+        .filter(p => p.enteredCoords[activeInstrumentId])
+        .map(p => ({ oldCoord: p.pixelCoords, newCoord: p.enteredCoords[activeInstrumentId] }));
+      const proxy = applyPixelProxy(point.pixelCoords, refs, activeInst);
+      if (proxy.confidence !== 'none') {
+        x = proxy.x.toFixed(6);
+        y = proxy.y.toFixed(6);
+        reliability = `Proxy (${proxy.confidence})`;
+      }
+    }
     
     const row = {
       "Point Name": point.name,
-      "Type": isRef ? "Reference" : "Target",
-      [`X (${activeInst.units})`]: coords ? coords.x.toFixed(6) : "N/A",
-      [`Y (${activeInst.units})`]: coords ? coords.y.toFixed(6) : "N/A",
+      "Type": manualCoords ? "Reference" : "Target",
+      "Reliability": reliability,
+      "Analysed": point.isAnalysed ? "YES" : "NO",
+      [`X (${activeInst?.units || 'units'})`]: x,
+      [`Y (${activeInst?.units || 'units'})`]: y,
       "Notes": point.notes || ""
     };
 
-    // Flatten tags into the row
     session.tagCategories.forEach(cat => {
       row[cat.name] = point.tags[cat.name] || "";
     });
@@ -90,7 +116,14 @@ export function generateCSV(session, computedCoords, transforms, activeInstrumen
  * Triggers a browser download for a string or blob.
  */
 export function triggerDownload(content, fileName, type = 'text/csv') {
-  const blob = content instanceof Blob ? content : new Blob([content], { type });
+  let blob;
+  if (type.includes('csv') && typeof content === 'string') {
+    const BOM = '\uFEFF';
+    blob = new Blob([BOM + content], { type: 'text/csv;charset=utf-8;' });
+  } else {
+    blob = content instanceof Blob ? content : new Blob([content], { type });
+  }
+  
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;

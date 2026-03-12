@@ -1,14 +1,22 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
 /**
  * NewProjectModal Component.
- * Initializes a new project with a name, sample ID, and source instrument.
+ * Initializes a new project or edits existing metadata.
  */
-export default function NewProjectModal({ isOpen, onCreate, onCancel }) {
+export default function NewProjectModal({ isOpen, session, isEdit, onCreate, onCancel }) {
   const [projectName, setProjectName] = useState('New Project');
   const [sampleId, setSampleId] = useState('SAMPLE-001');
   const [instrumentName, setInstrumentName] = useState('SEM');
   const [units, setUnits] = useState('µm');
+
+  // Sync state with session for editing
+  useEffect(() => {
+    if (isOpen && session) {
+      setProjectName(session.projectName || 'New Project');
+      setSampleId(session.sampleId || 'SAMPLE-001');
+    }
+  }, [isOpen, session]);
 
   if (!isOpen) return null;
 
@@ -16,7 +24,7 @@ export default function NewProjectModal({ isOpen, onCreate, onCancel }) {
     onCreate({
       projectName,
       sampleId,
-      sourceInstrument: {
+      sourceInstrument: isEdit ? null : {
         name: instrumentName,
         units,
         isSource: true
@@ -27,7 +35,7 @@ export default function NewProjectModal({ isOpen, onCreate, onCancel }) {
   return (
     <div style={styles.overlay}>
       <div style={styles.modal}>
-        <h2 style={styles.title}>Initialize New Project</h2>
+        <h2 style={styles.title}>{isEdit ? 'Edit Metadata' : 'Initialize New Project'}</h2>
         
         <div style={styles.field}>
           <label style={styles.label}>Project Name</label>
@@ -47,31 +55,38 @@ export default function NewProjectModal({ isOpen, onCreate, onCancel }) {
           />
         </div>
 
-        <hr style={styles.hr} />
-        <h4 style={styles.subTitle}>Source Instrument (Reference Frame)</h4>
-        
-        <div style={{ display: 'flex', gap: 12 }}>
-          <div style={{ ...styles.field, flex: 2 }}>
-            <label style={styles.label}>Instrument Name</label>
-            <input 
-              value={instrumentName} 
-              onChange={e => setInstrumentName(e.target.value)} 
-              style={styles.input} 
-            />
-          </div>
-          <div style={{ ...styles.field, flex: 1 }}>
-            <label style={styles.label}>Units</label>
-            <select value={units} onChange={e => setUnits(e.target.value)} style={styles.input}>
-              <option value="µm">µm</option>
-              <option value="mm">mm</option>
-              <option value="px">pixels</option>
-            </select>
-          </div>
-        </div>
+        {!isEdit && (
+          <>
+            <hr style={styles.hr} />
+            <h4 style={styles.subTitle}>Source Instrument (Reference Frame)</h4>
+            
+            <div style={{ display: 'flex', gap: 12 }}>
+              <div style={{ ...styles.field, flex: 2 }}>
+                <label style={styles.label}>Instrument Name</label>
+                <input 
+                  value={instrumentName} 
+                  onChange={e => setInstrumentName(e.target.value)} 
+                  style={styles.input} 
+                />
+              </div>
+              <div style={{ ...styles.field, flex: 1 }}>
+                <label style={styles.label}>Units</label>
+                <select value={units} onChange={e => setUnits(e.target.value)} style={styles.input}>
+                  <option value="µm">µm</option>
+                  <option value="mm">mm</option>
+                  <option value="px">px</option>
+                  <option value="Custom">Custom</option>
+                </select>
+              </div>
+            </div>
+          </>
+        )}
 
         <div style={styles.footer}>
           <button onClick={onCancel} style={styles.cancelBtn}>Cancel</button>
-          <button onClick={handleCreate} style={styles.createBtn}>Create Project</button>
+          <button onClick={handleCreate} style={styles.createBtn}>
+            {isEdit ? 'Update Details' : 'Create Project'}
+          </button>
         </div>
       </div>
     </div>
@@ -98,6 +113,6 @@ const styles = {
   },
   hr: { border: 'none', borderTop: '1px solid #444', margin: '8px 0' },
   footer: { marginTop: 24, display: 'flex', gap: 12, justifyContent: 'flex-end' },
-  createBtn: { backgroundColor: '#4caf50', border: 'none', padding: '10px 20px', borderRadius: 6, fontWeight: 'bold' },
-  cancelBtn: { backgroundColor: 'transparent', color: '#888', border: 'none' }
+  createBtn: { backgroundColor: '#4caf50', border: 'none', color: '#fff', padding: '10px 20px', borderRadius: 6, fontWeight: 'bold', cursor: 'pointer' },
+  cancelBtn: { backgroundColor: 'transparent', color: '#888', border: 'none', cursor: 'pointer' }
 };
