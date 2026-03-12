@@ -17,6 +17,22 @@ For lab computers with no internet access:
 
 ---
 
+## 🛠 For Project Owners (Deployment)
+
+To update the live website with your latest changes:
+
+1.  **Build the project:**
+    ```bash
+    npm run build
+    ```
+2.  **Deploy to GitHub:**
+    ```bash
+    npm run deploy
+    ```
+    *The app will be updated at the URL above within a few minutes.*
+
+---
+
 ## 🛠 The Scientific Workflow (Step-by-Step)
 
 ### Phase 1: Project & Asset Setup

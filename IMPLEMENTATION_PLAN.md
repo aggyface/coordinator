@@ -28,7 +28,6 @@ Complete these before any app code. Each is a self-contained gemini-cli session.
 |---|---|---|
 | Infra 1 | `scripts/verify-engine.js` | Standalone math validation — 32 named test cases |
 | Infra 2 | `scripts/generate-test-project.js` | Generates dummy `.labcoord` for UI testing |
-| Infra 3b | `.git/hooks/pre-commit` + `scripts/setup-hooks.sh` | Blocks commits if engine tests fail |
 
 ---
 
@@ -36,7 +35,7 @@ Complete these before any app code. Each is a self-contained gemini-cli session.
 
 | Prompt | Scope | Verify with |
 |---|---|---|
-| 0 | Vite scaffold, deps, component stubs, git hook | `npm run dev` — zero console errors |
+| 0 | Vite scaffold, deps, component stubs | `npm run dev` — zero console errors |
 | 1 | `transform.js` — full engine + validation functions | `node scripts/verify-engine.js` — all pass |
 | 2 | `useSession.js` — reactive state, derived reference status | verify-engine still passes |
 | 3a | Image decode (BMP/JPG/TIFF), fit-to-window | Load test `.labcoord`, image shows |
