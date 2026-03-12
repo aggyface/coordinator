@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import useSession from './hooks/useSession';
 import { decodeImage } from './engine/imageLoader';
-import { generateCSV, triggerDownload } from './engine/exportUtils';
+import { generateCSV, triggerDownload, generateAnnotatedImage } from './engine/exportUtils';
 import Toolbar from './components/Toolbar';
 import ImageCanvas from './components/ImageCanvas';
 import PointList from './components/PointList';
@@ -124,16 +124,14 @@ export default function App() {
     setIsExporting(true);
     try {
       const clone = await createImageBitmap(imageBitmap);
-      const blob = await import('./engine/exportUtils').then(m => 
-        m.generateAnnotatedImage(
-          clone, 
-          session.points, 
-          activeInstrumentId, 
-          session.tagCategories, 
-          showLegend, 
-          showScaleBar,
-          transforms
-        )
+      const blob = await generateAnnotatedImage(
+        clone, 
+        session.points, 
+        activeInstrumentId, 
+        session.tagCategories, 
+        showLegend, 
+        showScaleBar,
+        transforms
       );
       triggerDownload(blob, `${session.projectName}_Annotated.png`, 'image/png');
     } catch (err) {
