@@ -176,6 +176,38 @@ export default function useSession() {
     setIsDirty(false);
   }, []);
 
+  const setSessionMetadata = (projectName, sampleId) => updateSession(prev => ({ ...prev, projectName, sampleId }));
+
+  /**
+   * Atomic Create Project.
+   * Clears everything and sets metadata/instrument in one go.
+   */
+  const createNewProject = useCallback((metadata) => {
+    const newSession = {
+      ...INITIAL_SESSION,
+      projectName: metadata.projectName,
+      sampleId: metadata.sampleId,
+      instruments: metadata.sourceInstrument ? [{
+        id: crypto.randomUUID(),
+        qualityOverridden: false,
+        transform: null,
+        ...metadata.sourceInstrument
+      }] : []
+    };
+    
+    setSession(newSession);
+    setImageBuffer(null);
+    setImageBitmap(null);
+    setIsDirty(false);
+  }, []);
+
+  const resetSession = useCallback(() => {
+    setSession(INITIAL_SESSION);
+    setImageBuffer(null);
+    setImageBitmap(null);
+    setIsDirty(false);
+  }, []);
+
   return {
     session,
     computedCoords,
@@ -195,6 +227,8 @@ export default function useSession() {
     updateTagCategories,
     saveSession,
     loadSession,
-    setSessionMetadata: (projectName, sampleId) => updateSession(prev => ({ ...prev, projectName, sampleId }))
+    setSessionMetadata,
+    createNewProject,
+    resetSession
   };
 }

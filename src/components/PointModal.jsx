@@ -87,7 +87,13 @@ export default function PointModal({ point, session, onSave, onClose, onDelete }
                     .filter(p => p.enteredCoords[inst.id])
                     .map(p => ({ oldCoord: p.pixelCoords, newCoord: p.enteredCoords[inst.id] }));
                   
-                  const proxy = !isEntered ? applyPixelProxy(point.pixelCoords, refs, inst) : null;
+                  let proxy = !isEntered ? applyPixelProxy(point.pixelCoords, refs, inst) : null;
+
+                  // Rationale: If this is the SOURCE instrument and no coords are entered,
+                  // default the proxy to the raw pixel coordinates to assist initialization.
+                  if (!isEntered && inst.isSource && (!proxy || proxy.confidence === 'none')) {
+                    proxy = { x: point.pixelCoords.x, y: point.pixelCoords.y, confidence: 'pixel-match' };
+                  }
 
                   return (
                     <tr key={inst.id}>

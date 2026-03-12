@@ -26,7 +26,8 @@ const ImageCanvas = forwardRef(({
   showScaleBar,
   onHover,
   imageBitmap,
-  onOpen
+  onOpen,
+  onImageLoad
 }, ref) => {
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
@@ -52,7 +53,7 @@ const ImageCanvas = forwardRef(({
   }));
 
   /**
-   * Helper to fit image to viewport.
+   * Helper to fit image to viewport and signal load complete.
    */
   const fitImage = useCallback(() => {
     if (imageBitmap && containerRef.current) {
@@ -63,8 +64,10 @@ const ImageCanvas = forwardRef(({
         y: (height - imageBitmap.height * scale) / 2,
         scale
       });
+      // CRITICAL: Notify parent that initial rendering/layout is complete
+      if (onImageLoad) onImageLoad();
     }
-  }, [imageBitmap]);
+  }, [imageBitmap, onImageLoad]);
 
   useEffect(() => {
     fitImage();
@@ -95,6 +98,7 @@ const ImageCanvas = forwardRef(({
   }, [viewport.scale, fitImage]);
 
   const adjustZoom = (factor) => {
+    if (!containerRef.current) return;
     const rect = containerRef.current.getBoundingClientRect();
     const centerX = rect.width / 2;
     const centerY = rect.height / 2;
@@ -145,7 +149,7 @@ const ImageCanvas = forwardRef(({
    */
   const renderScaleBar = (ctx, canvasWidth, canvasHeight) => {
     const activeInst = session.instruments.find(i => i.id === activeInstrumentId);
-    if (!activeInst) return;
+    if (!activeInst || activeInst.units === 'Custom') return; // Skip if custom/unknown units
 
     const refs = session.points
       .filter(p => p.enteredCoords[activeInstrumentId])
@@ -154,12 +158,10 @@ const ImageCanvas = forwardRef(({
     const scaleResult = computeLocalScale({ x: 0, y: 0 }, refs, activeInst.units);
     if (!scaleResult.scale) return;
 
-    // Scale is units/px. We want to find a nice round number of units.
     const screenPxPerUnit = viewport.scale / scaleResult.scale;
-    const targetBarWidthPx = 150; // We want a bar about 150px wide
+    const targetBarWidthPx = 150;
     const units = targetBarWidthPx / screenPxPerUnit;
     
-    // Round to nice number (1, 2, 5, 10, 20, 50, 100, 250, 500, etc)
     const magnitude = Math.pow(10, Math.floor(Math.log10(units)));
     const firstDigit = units / magnitude;
     let niceUnits = magnitude;
@@ -168,7 +170,6 @@ const ImageCanvas = forwardRef(({
     
     const barWidthPx = niceUnits * screenPxPerUnit;
 
-    // Draw Bar
     ctx.save();
     ctx.translate(30, canvasHeight - 40);
     ctx.strokeStyle = '#fff';
@@ -177,7 +178,6 @@ const ImageCanvas = forwardRef(({
     ctx.moveTo(0, -5); ctx.lineTo(0, 0); ctx.lineTo(barWidthPx, 0); ctx.lineTo(barWidthPx, -5);
     ctx.stroke();
 
-    // Label
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 12px sans-serif';
     ctx.textAlign = 'center';
@@ -198,22 +198,18 @@ const ImageCanvas = forwardRef(({
     const height = (colorCat.values.length + 1) * rowHeight + padding * 2;
 
     ctx.save();
-    // Position at Top Right
-    ctx.translate(canvasWidth - width - 20, 20);
+    ctx.translate(canvasWidth - width - 20, 20); // Top Right
     
-    // Box
     ctx.fillStyle = 'rgba(0, 0, 0, 0.6)';
     ctx.fillRect(0, 0, width, height);
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
     ctx.strokeRect(0, 0, width, height);
 
-    // Title
     ctx.fillStyle = '#aaa';
     ctx.font = 'bold 10px sans-serif';
     ctx.textAlign = 'left';
     ctx.fillText(colorCat.name.toUpperCase(), padding, padding + 10);
 
-    // Rows
     colorCat.values.forEach((v, i) => {
       const y = padding + 25 + (i * rowHeight);
       ctx.beginPath();
@@ -317,6 +313,7 @@ const ImageCanvas = forwardRef(({
   };
 
   const handleMouseMove = (e) => {
+    if (!canvasRef.current) return;
     const rect = canvasRef.current.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
@@ -392,8 +389,6 @@ const ImageCanvas = forwardRef(({
     } else if (mode === 'Add Point') {
       const px = (mouseX - viewport.x) / viewport.scale;
       const py = (mouseY - viewport.y) / viewport.scale;
-      
-      // Boundary check: Do not allow points off the image
       if (px >= 0 && px <= imageBitmap.width && py >= 0 && py <= imageBitmap.height) {
         onCanvasClick({ x: px, y: py });
       }

@@ -36,7 +36,9 @@ export default function App() {
     updateTagCategories,
     saveSession,
     loadSession,
-    setSessionMetadata
+    setSessionMetadata,
+    createNewProject,
+    resetSession
   } = useSession();
 
   const [mode, setMode] = useState('Select');
@@ -50,19 +52,19 @@ export default function App() {
   const [isExporting, setIsExporting] = useState(false);
   const [showLegend, setShowLegend] = useState(true);
   const [showScaleBar, setShowScaleBar] = useState(true);
-  const [fileHandle, setFileHandle] = useState(null); // Persistent file reference
+  const [fileHandle, setFileHandle] = useState(null);
   
   const canvasControlRef = React.useRef(null);
 
   // Automatic image decoding whenever the buffer changes
   useEffect(() => {
     if (imageBuffer && !imageBitmap) {
-      setIsImageLoading(true);
+      setIsImageLoading(true); // Start loading
       setTimeout(() => {
         decodeImage(imageBuffer).then(bitmap => {
           setImageBitmap(bitmap);
           window.imageBitmap = bitmap;
-          setIsImageLoading(false);
+          // Note: isImageLoading will be cleared by the Canvas via onImageLoad callback
         }).catch(err => {
           console.error(err);
           setIsImageLoading(false);
@@ -73,9 +75,13 @@ export default function App() {
   }, [imageBuffer, imageBitmap, setImageBitmap]);
 
   const handleCreateProject = (data) => {
-    setSessionMetadata(data.projectName, data.sampleId);
-    if (data.sourceInstrument) {
-      addInstrument(data.sourceInstrument);
+    if (isEditingMetadata) {
+      setSessionMetadata(data.projectName, data.sampleId);
+    } else {
+      createNewProject(data);
+      setFileHandle(null);
+      setActiveInstrumentId(null);
+      setSelectedPointId(null);
     }
     setIsNewProjectOpen(false);
     setIsEditingMetadata(false);
@@ -94,7 +100,6 @@ export default function App() {
     if (file.name.endsWith('.labcoord')) {
       await loadSession(file);
       setActiveInstrumentId(null);
-      // Attempt to capture file handle if this was a picker selection
       if ('FileSystemFileHandle' in window && file instanceof FileSystemFileHandle) {
         setFileHandle(file);
       }
@@ -107,15 +112,10 @@ export default function App() {
     }
   };
 
-  /**
-   * Universal Save Logic.
-   * If handle exists, overwrite. Otherwise, Save As.
-   */
   const handleSave = async () => {
     if (!fileHandle) {
       return handleSaveAs();
     }
-
     try {
       const blob = await saveSession();
       const writable = await fileHandle.createWritable();
@@ -123,18 +123,13 @@ export default function App() {
       await writable.close();
     } catch (err) {
       console.error('Persistent save failed, falling back to download:', err);
-      handleSaveAs(); // Fallback to classic download if permission denied
+      handleSaveAs();
     }
   };
 
-  /**
-   * Classic Save As / Download.
-   */
   const handleSaveAs = async () => {
     try {
       const blob = await saveSession();
-      
-      // Attempt modern File System Access if available
       if ('showSaveFilePicker' in window) {
         try {
           const handle = await window.showSaveFilePicker({
@@ -146,12 +141,8 @@ export default function App() {
           await writable.close();
           setFileHandle(handle);
           return;
-        } catch (e) {
-          // User cancelled or picker failed, continue to fallback
-        }
+        } catch (e) {}
       }
-
-      // Fallback: Standard browser download
       triggerDownload(blob, `${session.projectName || 'project'}.labcoord`, 'application/zip');
     } catch (err) {
       console.error('Save failed:', err);
@@ -286,6 +277,7 @@ export default function App() {
             }}
             imageBitmap={imageBitmap}
             onOpen={handleFileOpen}
+            onImageLoad={() => setIsImageLoading(false)} // Clear loading only when canvas scales
             ref={canvasControlRef}
           />
           

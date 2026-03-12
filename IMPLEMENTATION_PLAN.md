@@ -51,56 +51,21 @@ Complete these before any app code. Each is a self-contained gemini-cli session.
 
 ---
 
-## 4. Session Start Template (Infra 3)
-
-Paste at the start of every gemini-cli session:
-
-```
-We are working on [PROMPT NAME] for the LabCoordinator project.
-
-Before starting:
-1. Read GEMINI.md in this repo
-2. Read the [SECTION] section of BRIEF.md
-3. Run node scripts/verify-engine.js — confirm all tests pass
-
-Scope: [PASTE PROMPT TEXT FROM BRIEF.md]
-
-Constraints:
-- Do not modify transform.js unless this prompt requires it
-- Do not modify useSession.js unless this prompt requires it
-- Do not refactor files outside this prompt's scope
-- Run node scripts/verify-engine.js again when done
-
-Ready? Start by reading GEMINI.md.
-```
-
----
-
-## 5. Rollback Strategy
-
-gemini-cli checkpoints before every file edit:
-- `/restore` — list available snapshots
-- `/restore <n>` — roll back to before bad edits
-
-If session is already closed: `git revert` to last commit.
-Each completed prompt should be committed immediately as a permanent checkpoint.
-
----
-
 ## 6. Project Post-Mortem & Architecture Review
 
 ### Architectural Successes
 1. **Isolated Math Engine (`transform.js`):** Building the least-squares similarity transform as a set of pure, framework-agnostic functions was highly successful. It allowed us to write a standalone Node.js verification script (`verify-engine.js`) that proved the math against real-world Excel data before a single React component was written. This established absolute trust in the core logic.
-2. **Derived State Supremacy:** By strictly adhering to the rule "Derived state is never stored," we eliminated an entire category of desynchronization bugs. A point's "Reference" status is dynamically determined by the presence of `enteredCoords`, and all transformations are calculated on the fly in `useSession.js` via `useMemo`. This made the UI incredibly resilient to data edits.
-3. **OffscreenCanvas Export:** Delegating the high-resolution annotated image generation to a Web Worker (`exportWorker.js`) was essential. Drawing hundreds of markers onto a 250MB ImageBitmap on the main thread would have frozen the UI. The background worker ensures a smooth experience.
+2. **Derived State Supremacy:** By strictly adhering to the rule "Derived state is never stored," we eliminated an entire category of desynchronization bugs. A point's "Reference" status is dynamically determined by the presence of `enteredCoords`, and all transformations are calculated on the fly. This made the UI incredibly resilient to data edits.
+3. **Atomic State Resets:** During UAT, we discovered that simple state resets left artifacts between different samples. We implemented an "Atomic Create" method in `useSession.js` that wipes points, instruments, and image buffers in a single operation, enabling a professional multi-sample workflow.
+4. **Persistent File Access:** Integrating the **File System Access API** allowed for a true "Save" (overwrite) vs "Save As" workflow, behaving like a desktop application rather than a simple web downloader.
 
 ### Challenges & Adaptations
-1. **Small-Sample Statistics:** The original spec required flagging a transform as "blocked" if the RMSE was > 10x the median residual. During testing, we discovered that in a 4-point least-squares fit, a single massive outlier distorts the entire fit so heavily that *all* residuals become large, rendering the median-based ratio ineffective (yielding a ratio of ~1.02 instead of >10).
-    *   *Adaptation:* We updated the engine to explicitly use "Leave-One-Out" (LOO) residual analysis to identify specific errors (e.g., "Likely X/Y axis swap" or "Misplaced point"). These specific diagnoses are now surfaced in the UI.
-2. **React Layout Frustrations:** Complex nesting of Flexbox containers led to the classic "constricted grey frame" bug where the canvas refused to expand.
-    *   *Adaptation:* Implemented strict `min-height: 0` and `flex: 1` boundaries on parent containers to ensure the `ImageCanvas` correctly consumed all available viewport space.
-3. **Data Onboarding:** Initial UAT revealed that jumping straight to a "New Project" modal confused users if they hadn't loaded an image yet. 
-    *   *Adaptation:* We refined the startup flow. The app now loads into a "Ready" state, allowing users to Open an image first, which then seamlessly triggers the project initialization modal. Extensive UI hints and onboarding text were added to empty states.
+1. **Small-Sample Statistics:** The original spec required flagging a transform as "blocked" if the RMSE was > 10x the median residual. During testing, we discovered that in a 4-point least-squares fit, a single massive outlier distorts the entire fit so heavily that the median-based ratio is ineffective.
+    *   *Adaptation:* We updated the engine to explicitly use **Leave-One-Out (LOO) residual analysis** to identify specific errors like "Likely X/Y axis swap".
+2. **Export Encoding:** CSV exports originally corrupted the `µm` symbol in Excel.
+    *   *Adaptation:* Implemented Byte Order Mark (BOM) prepending to the CSV blob, ensuring UTF-8 compatibility with Microsoft Excel.
+3. **Large-Scale Rendering:** Rendering 250MB microscopy assets was freezing the UI during export.
+    *   *Adaptation:* Delegated the annotated image generation to an **OffscreenCanvas Web Worker**, ensuring the live interface remains responsive.
 
 ---
 
@@ -109,11 +74,11 @@ Each completed prompt should be committed immediately as a permanent checkpoint.
 ### Scale Bar & Proxy Derivation Precision
 Currently, the scale bar and the "Pixel Proxy" estimates (displayed in grey italics) rely on calculating a global pixels-per-unit ratio derived from the linear distance between reference points. 
 
-**The Problem:** In scenarios involving significant image rotation, sheer, or differing aspect ratios between the image capture hardware and the secondary instrument stage, this linear Euclidean distance calculation can introduce scale drift, resulting in inaccurate proxy coordinate predictions.
+**The Problem:** In scenarios involving significant image rotation, sheer, or differing aspect ratios between the image capture hardware and the secondary instrument stage, this linear Euclidean distance calculation can introduce scale drift.
 
 **Required Action:** 
 To repair the scaling issue, we require more accurate empirical data from the instruments. 
 1. **Data Needed:** Calibration grid mappings or specific known-distance stage movements.
 2. **Potential Fixes:** 
-    - Decouple the X-axis and Y-axis scaling factors (calculating scale independently for each vector).
-    - If the instruments demonstrate severe non-uniform scaling, we may need to upgrade the mathematical engine from a **Similarity Transform** (Rotation + uniform Scale + Translation) to a full **Affine Transform** (Rotation + independent X/Y Scale + Sheer + Translation).
+    - Decouple the X-axis and Y-axis scaling factors.
+    - Upgrade the math engine to a full **Affine Transform** if non-uniform scaling is confirmed.
