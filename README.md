@@ -1,44 +1,47 @@
 # LabCoordinator
 
-A specialized, desktop-friendly web application for microscopy researchers. LabCoordinator bridges the gap between disparate analytical instruments (e.g., Optical Microscope → SEM → EPMA) by allowing users to map points of interest on a high-resolution image and dynamically calculate coordinate transformations using a least-squares similarity mathematical model.
+A specialized, desktop-friendly web application for microscopy researchers.
+
+## 🚀 How to Use (For Students & Researchers)
+
+You do **not** need to install anything to use this tool. Simply open the link below in Chrome or Edge:
+
+👉 **[https://aggyface.github.io/coordinator/](https://aggyface.github.io/coordinator/)**
+
+---
+
+## 🛠 For Project Owners (Deployment)
+
+To update the live website with your latest changes:
+
+1.  **Build the project:**
+    ```bash
+    npm run build
+    ```
+2.  **Deploy to GitHub:**
+    ```bash
+    npm run deploy
+    ```
+    *The app will be updated at the URL above within a few minutes.*
+
+---
 
 ## Core Capabilities
 
-- **High-Performance Canvas:** Navigate massive microscopy assets (BMP, TIFF, JPG) using a hardware-accelerated canvas featuring semantic pan/zoom (up to 50x) and pixel-perfect marker rendering.
-- **Scientific Math Engine:** Pure functional implementation of Least-Squares Similarity Transforms. Includes outlier detection and geometric degeneracy warnings (e.g., collinearity or tight clustering).
-- **Reactive Workflow:** Zero "stale state" bugs. The application never stores derived coordinates. Transforms and target estimates are calculated on the fly as reference data is entered.
-- **"Navigate" Mode:** A specialized view for the active laboratory setting. Features a Picture-in-Picture (PiP) viewport, tag-based filtering, and a progress tracker to systematically step through analysis targets.
-- **Publication-Ready Export:** 
-  - **Data:** Unit-aware CSV exports with explicit reliability flagging (Manual vs Calculated vs Proxy) and BOM encoding for Excel compatibility.
-  - **Visuals:** High-resolution annotated PNG export processed via Web Workers, ensuring the main UI remains responsive during heavy renders. Includes dynamic legends and scale bars.
-
-## Project Setup
-
-This application is designed as a bespoke, fully client-side tool. It requires no backend database or cloud infrastructure, ensuring data privacy and offline capability in restricted laboratory environments.
-
-```bash
-# 1. Install dependencies
-npm install
-
-# 2. Start the local development server
-npm run dev
-
-# 3. Open your browser to http://localhost:5173
-```
+- **High-Performance Canvas:** Navigate massive microscopy assets (BMP, TIFF, JPG) with semantic pan/zoom (up to 50x).
+- **Scientific Math Engine:** Least-Squares Similarity Transforms with outlier detection and geometric warnings.
+- **"Navigate" Mode:** Specialized view for lab workflows featuring PiP viewport and progress tracking.
+- **Export:** Unit-aware CSVs and high-resolution annotated PNGs.
 
 ## The Scientific Workflow
 
-1. **Initialize:** Open the app and create a New Project. Define your primary "Source Instrument" (e.g., SEM) and its units.
-2. **Load Asset:** Click `Open` to load your baseline microscopy image (e.g., a `.bmp` file).
-3. **Stage Targets:** Switch to `Add Point` mode. Click features on the image to place markers (yellow ◎).
-4. **Calibrate:** Switch to `Select` mode. Click at least 3 distinct, widely-spaced markers and enter their known coordinates for your Source Instrument. They will convert to references (cyan ◆).
-5. **Chain Instruments:** Use the sidebar to `+ Add` a secondary instrument (e.g., EPMA). Enter coordinates for your reference points in this new system. The app will immediately calculate the RMSE and transform quality.
-6. **Execute:** Switch to `Navigate` mode while sitting at the secondary instrument. Use the calculated "Proxy" coordinates and the PiP view to locate your uncalibrated targets. Mark them as "Analysed" as you proceed.
-7. **Archive:** Click `Save` to bundle the image and session data into a portable `.labcoord` ZIP file.
+1. **Initialize:** Click `New` to name the project and define your source instrument.
+2. **Load Image:** Click `Open` to load your baseline microscopy image.
+3. **Stage Targets:** Use `Add Point` mode to place markers (yellow ◎).
+4. **Calibrate:** Use `Select` mode to enter instrument coordinates for at least 3 markers (cyan ◆).
+5. **Add Instrument:** Use the sidebar to add your target instrument (e.g., EPMA).
+6. **Execute:** Switch to `Navigate` mode to find your targets using the calculated "Proxy" coordinates.
+7. **Export:** Use `CSV` or `Image` buttons to save your results.
 
-## Current Known Issues
-
-### 1. Scale Bar & Proxy Derivation Precision
-Currently, the scale bar and the "Pixel Proxy" estimates rely on calculating a global pixels-per-unit ratio derived from the distance between reference points. In scenarios involving significant image rotation, sheer, or differing aspect ratios between the image capture and the instrument stage, this linear distance calculation can introduce scale drift. 
-
-**Required Action:** To repair the scaling issue, we require more accurate empirical data from the instruments (specifically, calibration grids or known-distance stage movements) to decouple the X-axis and Y-axis scaling factors, or to move from a Similarity Transform to a full Affine Transform model if the instruments demonstrate non-uniform scaling.
+## Technical Post-Mortem & Known Issues
+See `IMPLEMENTATION_PLAN.md` for a detailed architectural review and notes on the current scaling drift issue.
