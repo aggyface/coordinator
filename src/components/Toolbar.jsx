@@ -13,6 +13,7 @@ export default function Toolbar({
   onToggleScaleBar,
   onModeChange, 
   onSave, 
+  onSaveAs,
   onOpen, 
   onNew, 
   onEditMetadata,
@@ -49,7 +50,25 @@ export default function Toolbar({
         onChange={handleFileChange}
       />
 
-      <button onClick={onSave} disabled={!session}>Save</button>
+      {/* Split Save Button Group */}
+      <div style={{ display: 'flex', gap: 1 }}>
+        <button 
+          onClick={onSave} 
+          disabled={!session} 
+          style={{ borderTopRightRadius: 0, borderBottomRightRadius: 0, borderRight: '1px solid #222' }}
+          title="Save Project (Overwrite)"
+        >
+          Save
+        </button>
+        <button 
+          onClick={onSaveAs} 
+          disabled={!session} 
+          style={{ borderTopLeftRadius: 0, borderBottomLeftRadius: 0, padding: '4px 6px' }}
+          title="Save Project As..."
+        >
+          ▼
+        </button>
+      </div>
       
       <div style={{ borderLeft: '1px solid #555', height: 24, margin: '0 8px' }} />
 

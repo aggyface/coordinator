@@ -50,6 +50,7 @@ export default function App() {
   const [isExporting, setIsExporting] = useState(false);
   const [showLegend, setShowLegend] = useState(true);
   const [showScaleBar, setShowScaleBar] = useState(true);
+  const [fileHandle, setFileHandle] = useState(null); // Persistent file reference
   
   const canvasControlRef = React.useRef(null);
 
@@ -93,6 +94,10 @@ export default function App() {
     if (file.name.endsWith('.labcoord')) {
       await loadSession(file);
       setActiveInstrumentId(null);
+      // Attempt to capture file handle if this was a picker selection
+      if ('FileSystemFileHandle' in window && file instanceof FileSystemFileHandle) {
+        setFileHandle(file);
+      }
     } else {
       const buffer = await file.arrayBuffer();
       setImageBuffer(buffer);
@@ -102,9 +107,51 @@ export default function App() {
     }
   };
 
+  /**
+   * Universal Save Logic.
+   * If handle exists, overwrite. Otherwise, Save As.
+   */
   const handleSave = async () => {
+    if (!fileHandle) {
+      return handleSaveAs();
+    }
+
     try {
       const blob = await saveSession();
+      const writable = await fileHandle.createWritable();
+      await writable.write(blob);
+      await writable.close();
+    } catch (err) {
+      console.error('Persistent save failed, falling back to download:', err);
+      handleSaveAs(); // Fallback to classic download if permission denied
+    }
+  };
+
+  /**
+   * Classic Save As / Download.
+   */
+  const handleSaveAs = async () => {
+    try {
+      const blob = await saveSession();
+      
+      // Attempt modern File System Access if available
+      if ('showSaveFilePicker' in window) {
+        try {
+          const handle = await window.showSaveFilePicker({
+            suggestedName: `${session.projectName || 'project'}.labcoord`,
+            types: [{ description: 'LabCoordinator Project', accept: { 'application/zip': ['.labcoord'] } }],
+          });
+          const writable = await handle.createWritable();
+          await writable.write(blob);
+          await writable.close();
+          setFileHandle(handle);
+          return;
+        } catch (e) {
+          // User cancelled or picker failed, continue to fallback
+        }
+      }
+
+      // Fallback: Standard browser download
       triggerDownload(blob, `${session.projectName || 'project'}.labcoord`, 'application/zip');
     } catch (err) {
       console.error('Save failed:', err);
@@ -161,13 +208,14 @@ export default function App() {
         onModeChange={(newMode) => {
           setMode(newMode);
           if (mode === 'Navigate' && newMode === 'Select') {
-            setSelectedPointId(null); // Fix: Clear selection when exiting Navigate mode
+            setSelectedPointId(null);
           }
         }}
         onTagsOpen={() => setIsTagDrawerOpen(true)}
         onNew={() => setIsNewProjectOpen(true)}
         onEditMetadata={() => setIsEditingMetadata(true)}
         onSave={handleSave}
+        onSaveAs={handleSaveAs}
         onOpen={handleFileOpen}
         onExportCSV={handleExportCSV}
         onExportImage={handleExportImage}

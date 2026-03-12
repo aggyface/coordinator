@@ -102,6 +102,7 @@ export default function InstrumentQualityPanel({ session, transforms, activeInst
           const chained = computeChainedRMSE(inst.id, session.instruments, transforms);
           const transform = transforms instanceof Map ? transforms.get(inst.id) : transforms[inst.id];
           const outliers = transform?.outliers || [];
+          const hasHighError = transform && (transform.rmse > 0.1 || transform.status !== 'ok');
 
           return (
             <div 
@@ -109,7 +110,7 @@ export default function InstrumentQualityPanel({ session, transforms, activeInst
               onClick={() => onSetActive(inst.id)}
               style={{
                 ...styles.instRow,
-                borderColor: outliers.length > 0 ? '#ff4d4d' : (isActive ? '#00ffff' : '#444'),
+                borderColor: (outliers.length > 0 || hasHighError) ? '#ff4d4d' : (isActive ? '#00ffff' : '#444'),
                 backgroundColor: isActive ? '#2a2a2a' : 'transparent'
               }}
             >
@@ -125,15 +126,18 @@ export default function InstrumentQualityPanel({ session, transforms, activeInst
                 <div style={styles.qualityInfo}>
                   <div style={styles.rmseRow}>
                     <span>RMSE:</span>
-                    <span style={{ color: outliers.length > 0 ? '#ff4d4d' : (transform ? '#4caf50' : '#888') }}>
+                    <span style={{ color: (outliers.length > 0 || hasHighError) ? '#ff4d4d' : (transform ? '#4caf50' : '#888') }}>
                       {transform ? transform.rmse.toFixed(4) : 'N/A'}
                     </span>
                   </div>
                   
                   {/* Outlier / Diagnosis Alerts */}
-                  {outliers.length > 0 && (
+                  {(outliers.length > 0 || hasHighError) && (
                     <div style={styles.errorBox}>
                       <div style={styles.errorTitle}>⚠ QUALITY ALERT</div>
+                      {hasHighError && outliers.length === 0 && (
+                        <div style={styles.errorRow}>Precision threshold exceeded (&gt;0.1)</div>
+                      )}
                       {outliers.map(o => {
                         const pt = session.points.find(p => p.id === o.id);
                         return (

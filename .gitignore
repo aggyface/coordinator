@@ -4,6 +4,10 @@ dist/
 *.bmp
 *.tif
 *.tiff
+*.png
+*.jpg
+*.jpeg
+*.csv
 .env
 .DS_Store
 package-lock.json
