@@ -415,17 +415,38 @@ const ImageCanvas = forwardRef(({
       
       <div style={styles.navOverlay}>
         <div style={styles.pad}>
-          <button onClick={() => setViewport(v => ({ ...v, y: v.y + 100 }))} style={styles.navBtn}>▲</button>
+          <button 
+            onClick={(e) => { e.stopPropagation(); setViewport(v => ({ ...v, y: v.y + 100 })); }} 
+            style={styles.navBtn}
+          >▲</button>
           <div style={{ display: 'flex', gap: 4 }}>
-            <button onClick={() => setViewport(v => ({ ...v, x: v.x + 100 }))} style={styles.navBtn}>◀</button>
-            <button onClick={fitImage} style={{ ...styles.navBtn, color: '#00ffff' }}>◎</button>
-            <button onClick={() => setViewport(v => ({ ...v, x: v.x - 100 }))} style={styles.navBtn}>▶</button>
+            <button 
+              onClick={(e) => { e.stopPropagation(); setViewport(v => ({ ...v, x: v.x + 100 })); }} 
+              style={styles.navBtn}
+            >◀</button>
+            <button 
+              onClick={(e) => { e.stopPropagation(); fitImage(); }} 
+              style={{ ...styles.navBtn, color: '#00ffff' }}
+            >◎</button>
+            <button 
+              onClick={(e) => { e.stopPropagation(); setViewport(v => ({ ...v, x: v.x - 100 })); }} 
+              style={styles.navBtn}
+            >▶</button>
           </div>
-          <button onClick={() => setViewport(v => ({ ...v, y: v.y - 100 }))} style={styles.navBtn}>▼</button>
+          <button 
+            onClick={(e) => { e.stopPropagation(); setViewport(v => ({ ...v, y: v.y - 100 })); }} 
+            style={styles.navBtn}
+          >▼</button>
         </div>
         <div style={{ ...styles.pad, marginTop: 12 }}>
-          <button onClick={() => adjustZoom(1.5)} style={styles.navBtn}>+</button>
-          <button onClick={() => adjustZoom(1/1.5)} style={styles.navBtn}>-</button>
+          <button 
+            onClick={(e) => { e.stopPropagation(); adjustZoom(1.5); }} 
+            style={styles.navBtn}
+          >+</button>
+          <button 
+            onClick={(e) => { e.stopPropagation(); adjustZoom(1/1.5); }} 
+            style={styles.navBtn}
+          >-</button>
         </div>
       </div>
     </div>

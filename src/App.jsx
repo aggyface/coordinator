@@ -162,6 +162,7 @@ export default function App() {
     setIsExporting(true);
     try {
       const clone = await createImageBitmap(imageBitmap);
+      const activeInst = session.instruments.find(i => i.id === activeInstrumentId);
       const blob = await generateAnnotatedImage(
         clone, 
         session.points, 
@@ -169,7 +170,9 @@ export default function App() {
         session.tagCategories, 
         showLegend, 
         showScaleBar,
-        transforms
+        transforms,
+        activeInst?.units || 'units',
+        session.instruments
       );
       triggerDownload(blob, `${session.projectName}_Annotated.png`, 'image/png');
     } catch (err) {
