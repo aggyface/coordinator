@@ -56,6 +56,10 @@ export default function App() {
   
   const canvasControlRef = React.useRef(null);
 
+  const handleImageLoad = useCallback(() => {
+    setIsImageLoading(false);
+  }, []);
+
   // Automatic image decoding whenever the buffer changes
   useEffect(() => {
     if (imageBuffer && !imageBitmap) {
@@ -280,7 +284,7 @@ export default function App() {
             }}
             imageBitmap={imageBitmap}
             onOpen={handleFileOpen}
-            onImageLoad={() => setIsImageLoading(false)} // Clear loading only when canvas scales
+            onImageLoad={handleImageLoad}
             ref={canvasControlRef}
           />
           

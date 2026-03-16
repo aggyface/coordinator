@@ -36,6 +36,7 @@ const ImageCanvas = forwardRef(({
   const [viewport, setViewport] = useState({ x: 0, y: 0, scale: 1 });
   const [isPanning, setIsPanning] = useState(false);
   const lastMousePos = useRef({ x: 0, y: 0 });
+  const lastBitmapRef = useRef(null);
 
   /**
    * Expose controls to parent via ref.
@@ -70,7 +71,11 @@ const ImageCanvas = forwardRef(({
   }, [imageBitmap, onImageLoad]);
 
   useEffect(() => {
-    fitImage();
+    // Only auto-fit if the bitmap reference has actually changed (new image loaded)
+    if (imageBitmap && imageBitmap !== lastBitmapRef.current) {
+      fitImage();
+      lastBitmapRef.current = imageBitmap;
+    }
   }, [imageBitmap, fitImage]);
 
   /**
