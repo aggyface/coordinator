@@ -72,13 +72,18 @@ actions to prevent user error at the instrument.
     Warn on close via `window.beforeunload` if unsaved changes.
 
 16. **Annotated image export renders at full image resolution.** User specifies
-    marker and label size at export time. Legend bottom-right.
+    marker and label size at export time. Legend bottom-right. Worker logic is
+    hardened with explicit context acquisition and data guards for robustness.
 
 17. **CSV type column is derived at export time** from entered coordinates —
     never stored. Units appear in column headers: `epma_x (µm)`.
 
 18. **Welcome screen detects file type on drag-drop.** `.labcoord` opens directly;
     BMP/JPG/TIFF starts new project with image pre-loaded.
+
+19. **Non-passive event listeners for zoom:** To ensure compatibility with Chrome,
+    the `wheel` listener in `ImageCanvas` is added manually with `{ passive: false }`
+    to allow `preventDefault()` for custom zoom math.
 
 ---
 

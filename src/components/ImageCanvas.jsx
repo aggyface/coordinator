@@ -359,18 +359,34 @@ const ImageCanvas = forwardRef(({
 
   const handleMouseUp = () => setIsPanning(false);
 
-  const handleWheel = (e) => {
-    e.preventDefault();
-    const factor = Math.pow(1.1, -e.deltaY / 100);
-    const rect = canvasRef.current.getBoundingClientRect();
-    const mouseX = e.clientX - rect.left;
-    const mouseY = e.clientY - rect.top;
-    setViewport(prev => {
-      const newScale = Math.max(0.01, Math.min(prev.scale * factor, 50));
-      const actualFactor = newScale / prev.scale;
-      return { scale: newScale, x: mouseX - (mouseX - prev.x) * actualFactor, y: mouseY - (mouseY - prev.y) * actualFactor };
-    });
-  };
+  useEffect(() => {
+    const handleWheel = (e) => {
+      e.preventDefault();
+      const factor = Math.pow(1.1, -e.deltaY / 100);
+      const rect = containerRef.current.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left;
+      const mouseY = e.clientY - rect.top;
+      setViewport(prev => {
+        const newScale = Math.max(0.01, Math.min(prev.scale * factor, 50));
+        const actualFactor = newScale / prev.scale;
+        return {
+          scale: newScale,
+          x: mouseX - (mouseX - prev.x) * actualFactor,
+          y: mouseY - (mouseY - prev.y) * actualFactor
+        };
+      });
+    };
+
+    const container = containerRef.current;
+    if (container) {
+      container.addEventListener('wheel', handleWheel, { passive: false });
+    }
+    return () => {
+      if (container) {
+        container.removeEventListener('wheel', handleWheel);
+      }
+    };
+  }, []);
 
   const handleClick = (e) => {
     if (isPanning || !imageBitmap || e.button !== 0) return;
@@ -411,7 +427,6 @@ const ImageCanvas = forwardRef(({
       onMouseMove={handleMouseMove}
       onMouseUp={handleMouseUp}
       onMouseLeave={() => { handleMouseUp(); onHover(null); }}
-      onWheel={handleWheel}
       onClick={handleClick}
       onDragOver={(e) => { e.preventDefault(); e.stopPropagation(); }}
       onDrop={(e) => { e.preventDefault(); e.stopPropagation(); const file = e.dataTransfer.files[0]; if (file && onOpen) onOpen(file); }}

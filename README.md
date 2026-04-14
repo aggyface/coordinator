@@ -75,6 +75,10 @@ To update the live website with your latest changes:
 
 ## ⚠ Technical Notes & Known Issues
 
+### Chrome Compatibility
+- **Local Server Requirement:** Due to browser security policies regarding high-performance APIs (Web Workers and ImageBitmap), image export may fail when running the app directly from the file system (`file://`). For full functionality, use a local development server (`npm run dev`) or the hosted web link.
+- **Passive Listeners:** The zoom functionality has been optimized for Chrome by explicitly using non-passive event listeners, ensuring smooth scroll-to-zoom behavior.
+
 ### Coordinate Reliability Colors
 - **Cyan:** Verified Manual entry or Inside the reference hull (Highest Reliability).
 - **Yellow:** Near or just outside the reference hull (Extrapolated).
